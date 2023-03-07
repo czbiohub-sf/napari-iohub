@@ -1,0 +1,28 @@
+name: napari-iohub
+display_name: napari iohub
+contributions:
+  commands:
+    - id: napari-iohub.get_reader
+      python_name: napari_iohub._reader:napari_get_reader
+      title: Open data with napari iohub
+    - id: napari-iohub.make_qwidget
+      python_name: napari_iohub._widget:ExampleQWidget
+      title: Make example QWidget
+    - id: napari-iohub.make_magic_widget
+      python_name: napari_iohub._widget:example_magic_widget
+      title: Make example magic widget
+    - id: napari-iohub.make_func_widget
+      python_name: napari_iohub._widget:example_function_widget
+      title: Make example function widget
+  readers:
+    - command: napari-iohub.get_reader
+      accepts_directories: false
+      filename_patterns: ['*.npy']
+  widgets:
+    - command: napari-iohub.make_qwidget
+      display_name: Example QWidget
+    - command: napari-iohub.make_magic_widget
+      display_name: Example Magic Widget
+    - command: napari-iohub.make_func_widget
+      autogenerate: true
+      display_name: Example Function Widget
