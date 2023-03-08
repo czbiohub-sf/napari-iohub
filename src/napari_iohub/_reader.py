@@ -6,12 +6,11 @@ from typing import TYPE_CHECKING
 
 import dask.array as da
 from iohub.ngff import MultiScaleMeta, Position, Well, _open_store, OMEROMeta
+from pydantic.color import Color
 
 if TYPE_CHECKING:
+    import napari
     from _typeshed import StrOrBytesPath
-
-
-_CM_LUT = {"FFFFFF": "gray"}
 
 
 def stitch_dataset(path: StrOrBytesPath, row_wrap: int = None):
@@ -81,9 +80,12 @@ def _ome_to_napari_by_channel(metadata):
     omero: OMEROMeta = metadata.omero
     layers_kwargs = []
     for channel in omero.channels:
-        layers_kwargs.append({"name": channel.label})
-        if channel.color in _CM_LUT:
-            layers_kwargs[-1]["colormap"] = _CM_LUT[channel.color]
+        metadata = {"name": channel.label}
+        if channel.color:
+            metadata["colormap"] = Color(channel.color).as_rgb_tuple(
+                alpha=False
+            )
+        layers_kwargs.append(metadata)
     return layers_kwargs
 
 
