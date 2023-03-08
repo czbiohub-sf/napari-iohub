@@ -118,7 +118,7 @@ def napari_get_reader(path):
         path = path[0]
 
     # if we know we cannot read the file, we immediately return None.
-    if not os.path.isdir(path):
+    if not (os.path.isdir(path) and ".zarr" in path):
         return None
 
     # otherwise we return the *function* that can read ``path``.
