@@ -10,7 +10,6 @@ from iohub.ngff import MultiScaleMeta, Position, Well, _open_store, OMEROMeta
 from pydantic.color import Color
 
 if TYPE_CHECKING:
-    import napari
     from _typeshed import StrOrBytesPath
 
 
