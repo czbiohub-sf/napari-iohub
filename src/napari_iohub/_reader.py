@@ -1,11 +1,90 @@
-"""
-This module is an example of a barebones numpy reader plugin for napari.
+from __future__ import annotations
 
-It implements the Reader specification, but your plugin may choose to
-implement multiple readers or even other plugin contributions. see:
-https://napari.org/stable/plugins/guides.html?#readers
-"""
-import numpy as np
+import logging
+import os
+from typing import TYPE_CHECKING
+
+import dask.array as da
+from iohub.ngff import MultiScaleMeta, Position, Well, _open_store, OMEROMeta
+
+if TYPE_CHECKING:
+    from _typeshed import StrOrBytesPath
+
+
+_CM_LUT = {"FFFFFF": "gray"}
+
+
+def stitch_dataset(path: StrOrBytesPath, row_wrap: int = None):
+    if not row_wrap:
+        row_wrap = 4
+    try:
+        zgroup = _open_store(path, mode="r", version="0.4")
+        if "well" in zgroup.attrs:
+            first_pos_grp = next(zgroup.groups())[1]
+            channel_names = Position(first_pos_grp).channel_names
+            well = Well(
+                group=zgroup,
+                parse_meta=True,
+                channel_names=channel_names,
+                version="0.4",
+            )
+    except Exception as e:
+        raise RuntimeError(e)
+    return _stitch_well_by_channel(well, row_wrap=row_wrap)
+
+
+def _stitch_well_by_channel(well: Well, row_wrap: int):
+    logging.info(f"Stitching well: {well.zgroup.name}")
+    levels = []
+    pyramids: list[list] = []
+    for i, (pos_name, pos) in enumerate(well.positions()):
+        l, ims = _get_multiscales(pos)
+        levels.append(l)
+        pyramids.append(ims)
+        if i == 0:
+            layers_kwargs = _ome_to_napari_by_channel(pos.metadata)
+    stitched_arrays = []
+    for i in range(max(levels)):
+        ims = [p[i] for p in pyramids if i < len(p)]
+        grid = _make_grid(ims, cols=row_wrap)
+        stitched_arrays.append(da.block(grid))
+    return layers_kwargs, well, stitched_arrays
+
+
+def _get_multiscales(pos: Position):
+    ms: MultiScaleMeta = pos.metadata.multiscales[0]
+    images = [dataset.path for dataset in ms.datasets]
+    multiscales = []
+    for im in images:
+        try:
+            multiscales.append(da.from_zarr(pos[im]))
+        except Exception as e:
+            logging.warning(
+                f"Skipped array '{im}' at position {pos.zgroup.name}: {e}"
+            )
+    return len(multiscales), multiscales
+
+
+def _make_grid(elements: list[da.Array], cols: int):
+    ct = len(elements)
+    rows = ct // cols + int(bool(ct % cols))
+    grid = [elements[r * cols : (r + 1) * cols] for r in range(rows)]
+    diff = len(grid[0]) - len(grid[-1])
+    if diff > 0:
+        fill_shape = grid[0][0].shape
+        fill_type = grid[0][0].dtype
+        grid[-1].extend([da.zeros(fill_shape, fill_type)] * diff)
+    return grid
+
+
+def _ome_to_napari_by_channel(metadata):
+    omero: OMEROMeta = metadata.omero
+    layers_kwargs = []
+    for channel in omero.channels:
+        layers_kwargs.append({"name": channel.label})
+        if channel.color in _CM_LUT:
+            layers_kwargs[-1]["colormap"] = _CM_LUT[channel.color]
+    return layers_kwargs
 
 
 def napari_get_reader(path):
@@ -29,11 +108,17 @@ def napari_get_reader(path):
         path = path[0]
 
     # if we know we cannot read the file, we immediately return None.
-    if not path.endswith(".npy"):
+    if not os.path.isdir(path):
         return None
 
     # otherwise we return the *function* that can read ``path``.
     return reader_function
+
+
+def _find_ch_axis(dataset):
+    for i, axis in enumerate(dataset.axes):
+        if axis.type == "channel":
+            return i
 
 
 def reader_function(path):
@@ -58,15 +143,18 @@ def reader_function(path):
         layer. Both "meta", and "layer_type" are optional. napari will
         default to layer_type=="image" if not provided
     """
-    # handle both a string and a list of strings
-    paths = [path] if isinstance(path, str) else path
-    # load all files into array
-    arrays = [np.load(_path) for _path in paths]
-    # stack arrays into single array
-    data = np.squeeze(np.stack(arrays))
-
-    # optional kwargs for the corresponding viewer.add_* method
-    add_kwargs = {}
-
-    layer_type = "image"  # optional, default is "image"
-    return [(data, add_kwargs, layer_type)]
+    layer_type = "image"
+    layers_kwargs, dataset, arrays = stitch_dataset(path)
+    layers = []
+    ch_axis = _find_ch_axis(dataset)
+    if ch_axis is not None:
+        if ch_axis > 0:
+            pre_idx = [slice(None)] * ch_axis
+    else:
+        raise IndexError("Cannot index channel axis")
+    for i, kwargs in enumerate(layers_kwargs):
+        slc = tuple(pre_idx + [slice(i, i + 1)])
+        data = [da.squeeze(arr[slc], axis=ch_axis) for arr in arrays]
+        layer = (data, kwargs, layer_type)
+        layers.append(layer)
+    return layers
