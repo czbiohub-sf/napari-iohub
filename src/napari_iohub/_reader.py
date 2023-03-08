@@ -19,17 +19,19 @@ def stitch_dataset(path: StrOrBytesPath, row_wrap: int = None):
         row_wrap = 4
     try:
         zgroup = _open_store(path, mode="r", version="0.4")
-        if "well" in zgroup.attrs:
-            first_pos_grp = next(zgroup.groups())[1]
-            channel_names = Position(first_pos_grp).channel_names
-            well = Well(
-                group=zgroup,
-                parse_meta=True,
-                channel_names=channel_names,
-                version="0.4",
-            )
     except Exception as e:
         raise RuntimeError(e)
+    if "well" in zgroup.attrs:
+        first_pos_grp = next(zgroup.groups())[1]
+        channel_names = Position(first_pos_grp).channel_names
+        well = Well(
+            group=zgroup,
+            parse_meta=True,
+            channel_names=channel_names,
+            version="0.4",
+        )
+    else:
+        raise KeyError(f"NGFF well metadata not found under {zgroup.name}")
     return _stitch_well_by_channel(well, row_wrap=row_wrap)
 
 
