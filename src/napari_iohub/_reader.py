@@ -4,6 +4,7 @@ import logging
 import os
 from typing import TYPE_CHECKING
 
+import numpy as np
 import dask.array as da
 from iohub.ngff import MultiScaleMeta, Position, Well, _open_store, OMEROMeta
 from pydantic.color import Color
@@ -82,8 +83,14 @@ def _ome_to_napari_by_channel(metadata):
     for channel in omero.channels:
         metadata = {"name": channel.label}
         if channel.color:
-            metadata["colormap"] = Color(channel.color).as_rgb_tuple(
-                alpha=False
+            # alpha channel is optional
+            rgb = Color(channel.color).as_rgb_tuple(alpha=None)
+            start = [0] * 3
+            if len(rgb) == 4:
+                start += [1]
+            metadata["colormap"] = (
+                start,
+                [v / np.iinfo(np.uint8).max for v in rgb],
             )
         layers_kwargs.append(metadata)
     return layers_kwargs
