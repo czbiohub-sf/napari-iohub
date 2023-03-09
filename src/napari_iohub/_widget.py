@@ -27,7 +27,7 @@ class MainWidget(QWidget):
         self.viewer = napari_viewer
         self.cwd = os.getcwd()
         self.dataset = None
-        self.mode = "stitch"
+        self.view_mode = "stitch"
         self.main_layout = QVBoxLayout()
         self._add_load_dataset_layout()
         view_btn = QPushButton("Show well")
@@ -37,13 +37,24 @@ class MainWidget(QWidget):
 
     def _add_load_dataset_layout(self):
         form_layout = QFormLayout()
-        btn = QPushButton("Load dataset")
-        btn.clicked.connect(self._load_dataset)
+        load_btn = QPushButton("Load dataset")
+        load_btn.clicked.connect(self._load_dataset)
+        load_btn.setToolTip("Select a directory of the NGFF HCS plate dataset")
         self.dataset_path_le = QLineEdit()
         self.dataset_path_le.setReadOnly(True)
-        form_layout.addRow(btn, self.dataset_path_le)
+        form_layout.addRow(load_btn, self.dataset_path_le)
         self.row_cb = self._add_nav_cb("Row", self._load_row, form_layout)
         self.well_cb = self._add_nav_cb("Well", self._load_well, form_layout)
+        mode_cb = self._add_nav_cb("Mode", self._view_mode, form_layout)
+        mode_cb.addItems(["stitch", "stack"])
+        mode_cb.setToolTip(
+            (
+                "View mode for multiple positions:\n"
+                "'stitch' will stitch all the positions;\n"
+                "'stack' will stack all the positions "
+                "on the outer-most dimension"
+            )
+        )
         self.main_layout.addLayout(form_layout)
 
     def _add_nav_cb(
@@ -51,7 +62,7 @@ class MainWidget(QWidget):
     ):
         cb = QComboBox(self)
         label = QLabel(cb, text=label)
-        cb.currentIndexChanged[int].connect(connect)
+        cb.currentTextChanged[str].connect(connect)
         form_layout.addRow(label, cb)
         return cb
 
@@ -64,9 +75,7 @@ class MainWidget(QWidget):
         return path
 
     def _load_dataset(self):
-        path = self._choose_dir(
-            "Select a directory of the NGFF HCS plate dataset"
-        )
+        path = self._choose_dir()
         logging.debug(f"Got dataset path '{path}'")
         if path:
             self.dataset_path_le.setText(path)
@@ -80,9 +89,8 @@ class MainWidget(QWidget):
             logging.debug(f"Opened dataset with rows {self.row_names}")
             self.row_cb.addItems(self.row_names)
 
-    def _load_row(self, index: int):
-        logging.debug(f"Got row index {index}")
-        row_name = self.row_names[index]
+    def _load_row(self, row_name: str):
+        logging.debug(f"Got row name '{row_name}'")
         self.row: Row = self.dataset[row_name]
         self.well_cb.clear()
         self.well_names = []
@@ -93,16 +101,22 @@ class MainWidget(QWidget):
         logging.debug(f"Found wells {self.well_names} under row {row_name}")
         self.well_cb.addItems(self.well_names)
 
-    def _load_well(self, index: int):
-        logging.debug(f"Got well index {index}")
-        well_name = self.well_names[index]
+    def _load_well(self, well_name: str):
+        logging.debug(f"Got well name '{well_name}'")
         self.well: Well = self.row[well_name]
 
+    def _view_mode(self, view_mode: str):
+        logging.debug(f"Got well name '{view_mode}'")
+        self.view_mode = view_mode
+
     def _show_well(self):
-        show_info(f"Showing well {self.well.zgroup.name}")
+        show_info(f"Showing well '{self.well.zgroup.name}' \n")
         self.well.print_tree()
         worker = create_worker(
-            well_to_layers, well=self.well, mode=self.mode, layer_type="image"
+            well_to_layers,
+            well=self.well,
+            mode=self.view_mode,
+            layer_type="image",
         )
         worker.returned.connect(self._update_layers)
         logging.debug("Starting well data loading worker")

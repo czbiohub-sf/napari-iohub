@@ -14,4 +14,4 @@ contributions:
       filename_patterns: ['*']
   widgets:
     - command: napari-iohub.make_qwidget
-      display_name: main
+      display_name: NGFF HCS plate visualization
