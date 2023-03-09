@@ -1,10 +1,12 @@
-from __future__ import annotations
-
 import logging
 import os
-from typing import TYPE_CHECKING, Callable
+from typing import Callable
 
+import napari
 from iohub.ngff import Plate, Row, Well, open_ome_zarr
+from napari.layers import Layer
+from napari.utils.notifications import show_info
+from napari.qt.threading import create_worker
 from qtpy.QtWidgets import (
     QComboBox,
     QFileDialog,
@@ -16,8 +18,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-if TYPE_CHECKING:
-    import napari
+from napari_iohub._reader import well_to_layers
 
 
 class MainWidget(QWidget):
@@ -26,6 +27,7 @@ class MainWidget(QWidget):
         self.viewer = napari_viewer
         self.cwd = os.getcwd()
         self.dataset = None
+        self.mode = "stitch"
         self.main_layout = QVBoxLayout()
         self._add_load_dataset_layout()
         view_btn = QPushButton("Show well")
@@ -65,7 +67,7 @@ class MainWidget(QWidget):
         path = self._choose_dir(
             "Select a directory of the NGFF HCS plate dataset"
         )
-        logging.debug(f"Got dataset path {path}")
+        logging.debug(f"Got dataset path '{path}'")
         if path:
             self.dataset_path_le.setText(path)
             self.dataset: Plate = open_ome_zarr(
@@ -97,5 +99,20 @@ class MainWidget(QWidget):
         self.well: Well = self.row[well_name]
 
     def _show_well(self):
-        logging.info("Showing well:\n" + self.well.print_tree())
-        
+        show_info(f"Showing well {self.well.zgroup.name}")
+        self.well.print_tree()
+        worker = create_worker(
+            well_to_layers, well=self.well, mode=self.mode, layer_type="image"
+        )
+        worker.returned.connect(self._update_layers)
+        logging.debug("Starting well data loading worker")
+        worker.start()
+
+    def _update_layers(self, layers: list[tuple]):
+        logging.debug("Clearing existing layers in the viewer")
+        if self.viewer.layers:
+            self.viewer.layers.clear()
+        for layer_data in layers:
+            logging.debug(f"Adding layer from {layer_data}")
+            layer = Layer.create(*layer_data)
+            _ = self.viewer.add_layer(layer)

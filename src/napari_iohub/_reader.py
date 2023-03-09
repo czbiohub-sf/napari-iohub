@@ -2,20 +2,24 @@ from __future__ import annotations
 
 import logging
 import os
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 import dask.array as da
-from iohub.ngff import MultiScaleMeta, Position, Well, _open_store, OMEROMeta
+from iohub.ngff import (
+    MultiScaleMeta,
+    Position,
+    Well,
+    _open_store,
+    OMEROMeta,
+)
 from pydantic.color import Color
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
 
 
-def stitch_dataset(path: StrOrBytesPath, row_wrap: int = None):
-    if not row_wrap:
-        row_wrap = 4
+def _get_well(path: StrOrBytesPath):
     try:
         zgroup = _open_store(path, mode="r", version="0.4")
     except Exception as e:
@@ -31,14 +35,14 @@ def stitch_dataset(path: StrOrBytesPath, row_wrap: int = None):
         )
     else:
         raise KeyError(f"NGFF well metadata not found under {zgroup.name}")
-    return _stitch_well_by_channel(well, row_wrap=row_wrap)
+    return well
 
 
-def _stitch_well_by_channel(well: Well, row_wrap: int):
-    logging.info(f"Stitching well: {well.zgroup.name}")
+def stitch_well_by_channel(well: Well, row_wrap: int):
+    logging.debug(f"Stitching well: {well.zgroup.name}")
     levels = []
     pyramids: list[list] = []
-    for i, (pos_name, pos) in enumerate(well.positions()):
+    for i, (_, pos) in enumerate(well.positions()):
         l, ims = _get_multiscales(pos)
         levels.append(l)
         pyramids.append(ims)
@@ -49,7 +53,24 @@ def _stitch_well_by_channel(well: Well, row_wrap: int):
         ims = [p[i] for p in pyramids if i < len(p)]
         grid = _make_grid(ims, cols=row_wrap)
         stitched_arrays.append(da.block(grid))
-    return layers_kwargs, well, stitched_arrays
+    return layers_kwargs, _find_ch_axis(well), stitched_arrays
+
+
+def stack_well_by_position(well: Well):
+    logging.debug(f"Stacking well: {well.zgroup.name}")
+    levels = []
+    pyramids: list[list] = []
+    for i, (_, pos) in enumerate(well.positions()):
+        l, ims = _get_multiscales(pos)
+        levels.append(l)
+        pyramids.append(ims)
+        if i == 0:
+            layers_kwargs = _ome_to_napari_by_channel(pos.metadata)
+    stacked_arrays = []
+    for i in range(max(levels)):
+        ims = [p[i] for p in pyramids if i < len(p)]
+        stacked_arrays.append(da.stack(ims, axis=0))
+    return layers_kwargs, _find_ch_axis(well), stacked_arrays
 
 
 def _get_multiscales(pos: Position):
@@ -86,13 +107,13 @@ def _ome_to_napari_by_channel(metadata):
         if channel.color:
             # alpha channel is optional
             rgb = Color(channel.color).as_rgb_tuple(alpha=None)
-            start = [0] * 3
+            start = [0.] * 3
             if len(rgb) == 4:
                 start += [1]
-            metadata["colormap"] = (
+            metadata["colormap"] = [
                 start,
                 [v / np.iinfo(np.uint8).max for v in rgb],
-            )
+            ]
         layers_kwargs.append(metadata)
     return layers_kwargs
 
@@ -125,10 +146,49 @@ def napari_get_reader(path):
     return reader_function
 
 
-def _find_ch_axis(dataset):
+def _find_ch_axis(dataset: Well):
     for i, axis in enumerate(dataset.axes):
         if axis.type == "channel":
             return i
+
+
+def layers_from_arrays(
+    layers_kwargs: list,
+    ch_axis: int,
+    arrays: list,
+    mode: Literal["stitch", "stack"],
+    layer_type="image",
+):
+    if mode == "stack":
+        ch_axis += 1
+    elif mode != "stitch":
+        raise ValueError(f"Unknown mode '{mode}'")
+    if ch_axis is not None:
+        if ch_axis == 0:
+            pre_idx = []
+        else:
+            pre_idx = [slice(None)] * ch_axis
+    else:
+        raise IndexError("Cannot index channel axis")
+    layers = []
+    for i, kwargs in enumerate(layers_kwargs):
+        slc = tuple(pre_idx + [slice(i, i + 1)])
+        data = [da.squeeze(arr[slc], axis=ch_axis) for arr in arrays]
+        layer = (data, kwargs, layer_type)
+        layers.append(layer)
+    return layers
+
+
+def well_to_layers(well, mode: Literal["stitch", "stack"], layer_type: str):
+    if mode == "stitch":
+        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(
+            well, row_wrap=4
+        )
+    elif mode == "stack":
+        layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
+    return layers_from_arrays(
+        layers_kwargs, ch_axis, arrays, mode=mode, layer_type=layer_type
+    )
 
 
 def reader_function(path):
@@ -153,18 +213,5 @@ def reader_function(path):
         layer. Both "meta", and "layer_type" are optional. napari will
         default to layer_type=="image" if not provided
     """
-    layer_type = "image"
-    layers_kwargs, dataset, arrays = stitch_dataset(path)
-    layers = []
-    ch_axis = _find_ch_axis(dataset)
-    if ch_axis is not None:
-        if ch_axis > 0:
-            pre_idx = [slice(None)] * ch_axis
-    else:
-        raise IndexError("Cannot index channel axis")
-    for i, kwargs in enumerate(layers_kwargs):
-        slc = tuple(pre_idx + [slice(i, i + 1)])
-        data = [da.squeeze(arr[slc], axis=ch_axis) for arr in arrays]
-        layer = (data, kwargs, layer_type)
-        layers.append(layer)
-    return layers
+    well = _get_well(path)
+    return well_to_layers(well, mode="stitch", layer_type="image")
