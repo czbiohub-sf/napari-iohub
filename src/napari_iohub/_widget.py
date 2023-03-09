@@ -4,7 +4,7 @@ from typing import Callable
 
 import napari
 from iohub.ngff import Plate, Row, Well, open_ome_zarr
-from napari.layers import Layer
+from napari.layers import Layer, image
 from napari.utils.notifications import show_info
 from napari.qt.threading import create_worker
 from qtpy.QtWidgets import (
@@ -110,9 +110,12 @@ class MainWidget(QWidget):
 
     def _update_layers(self, layers: list[tuple]):
         logging.debug("Clearing existing layers in the viewer")
-        if self.viewer.layers:
-            self.viewer.layers.clear()
+        # FIXME: different dimensions can cause errors
+        # here it clears all layers which will clear user settings too
+        self.viewer.layers.clear()
         for layer_data in layers:
-            logging.debug(f"Adding layer from {layer_data}")
-            layer = Layer.create(*layer_data)
-            _ = self.viewer.add_layer(layer)
+            logging.debug(f"Updating layer from {layer_data}")
+            # FIXME: this is a workaround
+            # constructing layer directly cause cryptic cmap errors
+            add_method = getattr(self.viewer, 'add_' + layer_data[2].lower())
+            add_method(layer_data[0], **layer_data[1])

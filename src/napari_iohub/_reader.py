@@ -110,10 +110,10 @@ def _ome_to_napari_by_channel(metadata):
             start = [0.] * 3
             if len(rgb) == 4:
                 start += [1]
-            metadata["colormap"] = [
+            metadata["colormap"] = np.array([
                 start,
                 [v / np.iinfo(np.uint8).max for v in rgb],
-            ]
+            ])
         layers_kwargs.append(metadata)
     return layers_kwargs
 
