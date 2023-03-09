@@ -115,7 +115,8 @@ class MainWidget(QWidget):
         self.viewer.layers.clear()
         for layer_data in layers:
             logging.debug(f"Updating layer from {layer_data}")
-            # FIXME: this is a workaround
-            # constructing layer directly cause cryptic cmap errors
-            add_method = getattr(self.viewer, 'add_' + layer_data[2].lower())
+            # FIXME: this is a workaround copied from
+            # https://github.com/napari/napari/blob/7ae2404f7636ce3e1e6db1386b96c69b88a52691/napari/components/viewer_model.py#L1375-L1376 # noqa
+            # constructing layer directly cause cryptic color map errors
+            add_method = getattr(self.viewer, "add_" + layer_data[2].lower())
             add_method(layer_data[0], **layer_data[1])
