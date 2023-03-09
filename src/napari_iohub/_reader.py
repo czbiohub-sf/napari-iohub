@@ -141,7 +141,8 @@ def napari_get_reader(path):
     # if we know we cannot read the file, we immediately return None.
     if not (os.path.isdir(path) and ".zarr" in path):
         return None
-
+    if not os.path.isfile(os.path.join(path, ".zattr")):
+        return None
     # otherwise we return the *function* that can read ``path``.
     return reader_function
 
