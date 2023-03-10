@@ -4,14 +4,16 @@ import logging
 import os
 from typing import TYPE_CHECKING, Literal
 
-import numpy as np
 import dask.array as da
+import numpy as np
 from iohub.ngff import (
     MultiScaleMeta,
+    OMEROMeta,
     Position,
     Well,
+    Plate,
     _open_store,
-    OMEROMeta,
+    open_ome_zarr,
 )
 from pydantic.color import Color
 
@@ -19,7 +21,36 @@ if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
 
 
-def _get_well(path: StrOrBytesPath):
+def napari_get_reader(path):
+    """A basic implementation of a Reader contribution.
+
+    Parameters
+    ----------
+    path : str or list of str
+        Path to file, or list of paths.
+
+    Returns
+    -------
+    function or None
+        If the path is a recognized format, return a function that accepts the
+        same path or list of paths, and returns a list of layer data tuples.
+    """
+    if isinstance(path, list):
+        # reader plugins may be handed single path, or a list of paths.
+        # if it is a list, it is assumed to be an image stack...
+        # so we are only going to look at the first file.
+        path = path[0]
+
+    # if we know we cannot read the file, we immediately return None.
+    if not (os.path.isdir(path) and ".zarr" in path):
+        return None
+    if not os.path.isfile(os.path.join(path, ".zattrs")):
+        return None
+    # otherwise we return the *function* that can read ``path``.
+    return reader_function
+
+
+def _get_node(path: StrOrBytesPath):
     try:
         zgroup = _open_store(path, mode="r", version="0.4")
     except Exception as e:
@@ -27,15 +58,20 @@ def _get_well(path: StrOrBytesPath):
     if "well" in zgroup.attrs:
         first_pos_grp = next(zgroup.groups())[1]
         channel_names = Position(first_pos_grp).channel_names
-        well = Well(
+        node = Well(
             group=zgroup,
             parse_meta=True,
             channel_names=channel_names,
             version="0.4",
         )
+    elif "plate" in zgroup.attrs:
+        zgroup.store.close()
+        node = open_ome_zarr(store_path=path, layout="hcs", mode="r")
     else:
-        raise KeyError(f"NGFF well metadata not found under {zgroup.name}")
-    return well
+        raise KeyError(
+            f"NGFF plate or well metadata not found under '{zgroup.name}'"
+        )
+    return node
 
 
 def stitch_well_by_channel(well: Well, row_wrap: int):
@@ -107,44 +143,17 @@ def _ome_to_napari_by_channel(metadata):
         if channel.color:
             # alpha channel is optional
             rgb = Color(channel.color).as_rgb_tuple(alpha=None)
-            start = [0.] * 3
+            start = [0.0] * 3
             if len(rgb) == 4:
                 start += [1]
-            metadata["colormap"] = np.array([
-                start,
-                [v / np.iinfo(np.uint8).max for v in rgb],
-            ])
+            metadata["colormap"] = np.array(
+                [
+                    start,
+                    [v / np.iinfo(np.uint8).max for v in rgb],
+                ]
+            )
         layers_kwargs.append(metadata)
     return layers_kwargs
-
-
-def napari_get_reader(path):
-    """A basic implementation of a Reader contribution.
-
-    Parameters
-    ----------
-    path : str or list of str
-        Path to file, or list of paths.
-
-    Returns
-    -------
-    function or None
-        If the path is a recognized format, return a function that accepts the
-        same path or list of paths, and returns a list of layer data tuples.
-    """
-    if isinstance(path, list):
-        # reader plugins may be handed single path, or a list of paths.
-        # if it is a list, it is assumed to be an image stack...
-        # so we are only going to look at the first file.
-        path = path[0]
-
-    # if we know we cannot read the file, we immediately return None.
-    if not (os.path.isdir(path) and ".zarr" in path):
-        return None
-    if not os.path.isfile(os.path.join(path, ".zattr")):
-        return None
-    # otherwise we return the *function* that can read ``path``.
-    return reader_function
 
 
 def _find_ch_axis(dataset: Well):
@@ -180,7 +189,9 @@ def layers_from_arrays(
     return layers
 
 
-def well_to_layers(well, mode: Literal["stitch", "stack"], layer_type: str):
+def well_to_layers(
+    well: Well, mode: Literal["stitch", "stack"], layer_type: str
+):
     if mode == "stitch":
         layers_kwargs, ch_axis, arrays = stitch_well_by_channel(
             well, row_wrap=4
@@ -189,6 +200,48 @@ def well_to_layers(well, mode: Literal["stitch", "stack"], layer_type: str):
         layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
     return layers_from_arrays(
         layers_kwargs, ch_axis, arrays, mode=mode, layer_type=layer_type
+    )
+
+
+def plate_to_layers(plate: Plate):
+    plate_arrays = []
+    for row_meta in plate.metadata.rows:
+        row_name = row_meta.name
+        row_arrays = []
+        for col_meta in plate.metadata.columns:
+            col_name = col_meta.name
+            if row_name + "/" + col_name in [
+                w.path for w in plate.metadata.wells
+            ]:
+                well = plate[row_name][col_name]
+                layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
+                row_arrays.append([a[0] for a in arrays])
+            else:
+                row_arrays.append(None)
+        plate_arrays.append(row_arrays)
+    first_blocks = next(a for a in plate_arrays[0] if a is not None)
+    fill_args = [(b.shape, b.dtype) for b in first_blocks]
+    for r, row in enumerate(plate_arrays):
+        for c, col in enumerate(row):
+            if col is None:
+                plate_arrays[r][c] = [
+                    da.zeros(shape=f[0], dypte=f[1]) for f in fill_args
+                ]
+    plate_levels = []
+    for level, _ in enumerate(first_blocks):
+        plate_level = []
+        for r in plate_arrays:
+            row_level = []
+            for c in r:
+                row_level.append(c[level])
+            plate_level.append(row_level)
+        plate_levels.append(da.block(plate_level))
+    return layers_from_arrays(
+        layers_kwargs,
+        ch_axis,
+        plate_levels,
+        mode="stitch",
+        layer_type="image",
     )
 
 
@@ -214,5 +267,8 @@ def reader_function(path):
         layer. Both "meta", and "layer_type" are optional. napari will
         default to layer_type=="image" if not provided
     """
-    well = _get_well(path)
-    return well_to_layers(well, mode="stitch", layer_type="image")
+    node = _get_node(path)
+    if isinstance(node, Well):
+        return well_to_layers(node, mode="stitch", layer_type="image")
+    else:
+        return plate_to_layers(node)
