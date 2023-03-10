@@ -203,12 +203,22 @@ def well_to_layers(
     )
 
 
-def plate_to_layers(plate: Plate):
+def plate_to_layers(
+    plate: Plate,
+    row_range: tuple[int, int] = None,
+    col_range: tuple[int, int] = None,
+):
     plate_arrays = []
-    for row_meta in plate.metadata.rows:
+    rows = plate.metadata.rows
+    if row_range:
+        rows = rows[row_range[0] : row_range[1]]
+    columns = plate.metadata.columns
+    if col_range:
+        columns = columns[col_range[0] : col_range[1]]
+    for row_meta in rows:
         row_name = row_meta.name
         row_arrays = []
-        for col_meta in plate.metadata.columns:
+        for col_meta in columns:
             col_name = col_meta.name
             if row_name + "/" + col_name in [
                 w.path for w in plate.metadata.wells
