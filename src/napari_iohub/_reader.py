@@ -221,19 +221,19 @@ def plate_to_layers(plate: Plate):
         plate_arrays.append(row_arrays)
     first_blocks = next(a for a in plate_arrays[0] if a is not None)
     fill_args = [(b.shape, b.dtype) for b in first_blocks]
-    for r, row in enumerate(plate_arrays):
-        for c, col in enumerate(row):
-            if col is None:
-                plate_arrays[r][c] = [
-                    da.zeros(shape=f[0], dypte=f[1]) for f in fill_args
-                ]
     plate_levels = []
     for level, _ in enumerate(first_blocks):
         plate_level = []
         for r in plate_arrays:
             row_level = []
             for c in r:
-                row_level.append(c[level])
+                if c is None:
+                    arr = da.zeros(
+                        shape=fill_args[level][0], dtype=fill_args[level][1]
+                    )
+                else:
+                    arr = c[level]
+                row_level.append(arr)
             plate_level.append(row_level)
         plate_levels.append(da.block(plate_level))
     return layers_from_arrays(
