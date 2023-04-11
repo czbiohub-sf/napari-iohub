@@ -7,28 +7,20 @@
 [![codecov](https://codecov.io/gh/czbiohub/napari-iohub/branch/main/graph/badge.svg)](https://codecov.io/gh/czbiohub/napari-iohub)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-iohub)](https://napari-hub.org/plugins/napari-iohub)
 
-NOME-Zarr viewer for napari with iohub as the I/O backend
+OME-Zarr viewer for napari with iohub as the I/O backend.
 
 ----------------------------------
 
 This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookiecutter-napari-plugin] template.
 
-<!--
-Don't miss the full getting started guide to set up your new package:
-https://github.com/napari/cookiecutter-napari-plugin#getting-started
-
-and review the napari docs for plugin developers:
-https://napari.org/stable/plugins/index.html
--->
-
 ## Installation
 
 You can install `napari-iohub` via [pip]:
 
-    pip install napari-iohub
-
-
-
+```sh
+git clone https://github.com/czbiohub/napari-iohub.git
+pip install napari-iohub
+```
 
 ## Contributing
 
@@ -38,7 +30,7 @@ the coverage at least stays the same before you submit a pull request.
 ## License
 
 Distributed under the terms of the [BSD-3] license,
-"napari-iohub" is free and open source software
+"napari-iohub" is free and open source software.
 
 ## Issues
 
@@ -59,3 +51,4 @@ If you encounter any problems, please [file an issue] along with a detailed desc
 [tox]: https://tox.readthedocs.io/en/latest/
 [pip]: https://pypi.org/project/pip/
 [PyPI]: https://pypi.org/
+[file an issue]: https://github.com/czbiohub/napari-iohub/issues
