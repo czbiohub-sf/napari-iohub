@@ -33,6 +33,9 @@ _logger.setLevel(logging.DEBUG)
 class _LoadFOV(QWidget):
     def __init__(self, parent: EditLabelsWidget) -> None:
         super().__init__(parent)
+        self.label_channel_pattern = os.getenv(
+            "NAPARI_IOHUB_LABEL_CHANNEL_PATTERN", "label"
+        )
         self.viewer = parent.viewer
         self.dataset: Plate | None = None
         layout = QVBoxLayout()
@@ -122,7 +125,7 @@ class _LoadFOV(QWidget):
                 data = data[0]
             meta["blending"] = "additive"
             name = meta["name"]
-            if "gfp" in name.lower():
+            if self.label_channel_pattern.lower() in name.lower():
                 layer_type = "labels"
                 self.labels_channel = name
                 if "colormap" in meta:
