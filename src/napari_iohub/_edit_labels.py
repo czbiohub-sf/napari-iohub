@@ -175,12 +175,14 @@ class _SaveFOV(QWidget):
         if not self.viewer.layers:
             warnings.warn("Must load images before saving. Doing nothing.")
             return
-        path = QFileDialog.getSaveFileName(
+        dialog = QFileDialog(
             parent=self,
             directory=os.getcwd(),
             caption="Zarr store to save to",
             filter="Zarr (*.zarr)",
-        )[0]
+        )
+        if dialog.exec():
+            path = dialog.selectedFiles()[0]
         _logger.debug(f"Got save dataset path '{path}'")
         if not path:
             return
@@ -230,7 +232,8 @@ class _SaveFOV(QWidget):
             _logger.debug(f"Created new image with shape {image.shape}")
         steps = self.viewer.dims.current_step
         _logger.info(f"Saving labels layer at coordinate {steps}")
-        image[steps[0], 0] = data[steps[0]]
+        ch_idx = fov.get_channel_index(self.loader.labels_channel)
+        image[steps[0], ch_idx] = data[steps[0]]
 
 
 class EditLabelsWidget(QWidget):
