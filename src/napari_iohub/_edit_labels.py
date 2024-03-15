@@ -190,7 +190,7 @@ class _SaveFOV(QWidget):
         self.dataset_path_le.setText(path)
         if Path(path).exists():
             channel_names = None
-            _logger.info("Save dataset exists, editing...")
+            warnings.warn("Save dataset exists, editing...")
         else:
             channel_names = [self.loader.labels_channel]
             _logger.info("Save dataset does not exist, creating...")
