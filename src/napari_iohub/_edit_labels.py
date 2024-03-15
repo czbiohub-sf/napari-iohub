@@ -19,6 +19,7 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+import numpy as np
 
 from napari_iohub._reader import fov_to_layers
 from napari_iohub._widget import _add_nav_combobox, _choose_dir
@@ -127,6 +128,8 @@ class _LoadFOV(QWidget):
             name = meta["name"]
             if self.label_channel_pattern.lower() in name.lower():
                 layer_type = "labels"
+                if not np.issubdtype(data.dtype, np.integer):
+                    data = data.astype("uint16", casting="unsafe")
                 self.labels_channel = name
                 if "colormap" in meta:
                     del meta["colormap"]
