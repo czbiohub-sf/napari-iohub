@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 from iohub.ngff import ImageArray, Plate, Position, Row, Well, open_ome_zarr
 from napari_ome_zarr._reader import napari_get_reader
 from qtpy.QtCore import Qt
@@ -19,7 +20,6 @@ from qtpy.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
-import numpy as np
 
 from napari_iohub._reader import fov_to_layers
 from napari_iohub._widget import _add_nav_combobox, _choose_dir
@@ -129,6 +129,9 @@ class _LoadFOV(QWidget):
             if self.label_channel_pattern.lower() in name.lower():
                 layer_type = "labels"
                 if not np.issubdtype(data.dtype, np.integer):
+                    _logger.info(
+                        f"Casting labels data to uint16. Original type was {data.dtype}"
+                    )
                     data = data.astype("uint16", casting="unsafe")
                 self.labels_channel = name
                 if "colormap" in meta:
@@ -147,7 +150,10 @@ class _SaveFOV(QWidget):
         self.dataset: Plate | None = None
         self.loader = parent.loader
         layout = QVBoxLayout()
-        label = QLabel("Save current timepoint")
+        label = QLabel(
+            "Save current timepoint\n"
+            "Click 'save' for each timepoint edited!"
+        )
         layout.addWidget(label)
         form = QFormLayout()
         load_btn = QPushButton("Browse dataset")
