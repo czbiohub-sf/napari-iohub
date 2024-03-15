@@ -181,6 +181,7 @@ class _SaveFOV(QWidget):
             caption="Zarr store to save to",
             filter="Zarr (*.zarr)",
         )
+        dialog.setFileMode(QFileDialog.FileMode.Directory)
         if dialog.exec():
             path = dialog.selectedFiles()[0]
         _logger.debug(f"Got save dataset path '{path}'")
