@@ -7,11 +7,8 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from iohub.ngff import ImageArray, Plate, Position, Row, Well, open_ome_zarr
-from napari_ome_zarr._reader import napari_get_reader
-from qtpy.QtCore import Qt
+from iohub.ngff import Plate, Position, Row, Well, open_ome_zarr
 from qtpy.QtWidgets import (
-    QComboBox,
     QFileDialog,
     QFormLayout,
     QLabel,
@@ -118,7 +115,7 @@ class _LoadFOV(QWidget):
         if not self.dataset:
             warnings.warn("No image to load. Doing nothing.")
             return
-        layers = fov_to_layers(self.fov)
+        layers: LayerData = fov_to_layers(self.fov)
         for data, meta, layer_type in layers:
             # HACK: if multiscale does not decrease in size napari will error
             # https://github.com/napari/napari/issues/984 was not fixed properly
