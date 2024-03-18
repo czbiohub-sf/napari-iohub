@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 import os
 import warnings
+from os.path import isdir, isfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -31,11 +32,9 @@ _logger.setLevel(logging.DEBUG)
 class _LoadFOV(QWidget):
     def __init__(self, parent: EditLabelsWidget) -> None:
         super().__init__(parent)
-        self.label_channel_pattern = os.getenv(
-            "NAPARI_IOHUB_LABEL_CHANNEL_PATTERN", "label"
-        )
         self.viewer = parent.viewer
         self.dataset: Plate | None = None
+        self.labels_channel: str | None = None
         layout = QVBoxLayout()
         label = QLabel("Load FOV")
         layout.addWidget(label)
@@ -46,6 +45,12 @@ class _LoadFOV(QWidget):
         self.dataset_path_le = QLineEdit()
         self.dataset_path_le.setReadOnly(True)
         form.addRow(load_btn, self.dataset_path_le)
+        self.channel_cb = _add_nav_combobox(
+            self,
+            label="Labels Channel",
+            connect=self._load_channel,
+            form_layout=form,
+        )
         self.row_cb = _add_nav_combobox(
             self, label="Row", connect=self._load_row, form_layout=form
         )
@@ -70,6 +75,8 @@ class _LoadFOV(QWidget):
         self.dataset = open_ome_zarr(
             path, layout="hcs", mode="r", version="0.4"
         )
+        self.channel_cb.clear()
+        self.channel_cb.addItems(self.dataset.channel_names)
         self.well_cb.clear()
         self.row_cb.clear()
         self.fov_cb.clear()
@@ -79,6 +86,10 @@ class _LoadFOV(QWidget):
         self.plate_wells = self.dataset.metadata.wells
         _logger.debug(f"Opened dataset with rows {self.row_names}")
         self.row_cb.addItems(self.row_names)
+
+    def _load_channel(self, channel_name: str):
+        _logger.debug(f"Setting labels channel to {channel_name}")
+        self.labels_channel = channel_name
 
     def _load_row(self, row_name: str):
         _logger.debug(f"Got row name '{row_name}'")
@@ -123,14 +134,13 @@ class _LoadFOV(QWidget):
                 data = data[0]
             meta["blending"] = "additive"
             name = meta["name"]
-            if self.label_channel_pattern.lower() in name.lower():
+            if self.labels_channel == name:
                 layer_type = "labels"
                 if not np.issubdtype(data.dtype, np.integer):
                     _logger.info(
                         f"Casting labels data to uint16. Original type was {data.dtype}"
                     )
                     data = data.astype("uint16", casting="unsafe")
-                self.labels_channel = name
                 if "colormap" in meta:
                     del meta["colormap"]
             if name not in self.viewer.layers:
@@ -138,6 +148,22 @@ class _LoadFOV(QWidget):
                 add_method(data, **meta)
             else:
                 self.viewer.layers[name].data = data
+
+
+class AnyDirectoryDialog(QFileDialog):
+    def __init__(self, parent, directory, caption, filter):
+        super().__init__(
+            parent, directory=directory, caption=caption, filter=filter
+        )
+        self.setOption(QFileDialog.DontUseNativeDialog)
+        self.setFileMode(QFileDialog.AnyFile)
+        self.currentChanged.connect(self._selected)
+
+    def _selected(self, name):
+        if Path(name).is_dir():
+            self.setFileMode(QFileDialog.Directory)
+        else:
+            self.setFileMode(QFileDialog.AnyFile)
 
 
 class _SaveFOV(QWidget):
@@ -172,13 +198,12 @@ class _SaveFOV(QWidget):
         if not self.viewer.layers:
             warnings.warn("Must load images before saving. Doing nothing.")
             return
-        dialog = QFileDialog(
+        dialog = AnyDirectoryDialog(
             parent=self,
             directory=os.getcwd(),
             caption="Zarr store to save to",
             filter="Zarr (*.zarr)",
         )
-        dialog.setFileMode(QFileDialog.FileMode.Directory)
         if dialog.exec():
             path = dialog.selectedFiles()[0]
         _logger.debug(f"Got save dataset path '{path}'")
