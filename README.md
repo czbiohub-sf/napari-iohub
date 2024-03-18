@@ -15,7 +15,9 @@ This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookie
 
 ## Installation
 
-You can install `napari-iohub` via [pip]:
+First, install [napari](https://napari.org/stable/tutorials/fundamentals/installation.html#installation).
+
+You can then install `napari-iohub` via [pip]:
 
 ```sh
 git clone https://github.com/czbiohub/napari-iohub.git
