@@ -8,6 +8,7 @@ import dask.array as da
 import numpy as np
 from iohub.ngff import (
     MultiScaleMeta,
+    NGFFNode,
     OMEROMeta,
     Position,
     Well,
@@ -156,7 +157,7 @@ def _ome_to_napari_by_channel(metadata):
     return layers_kwargs
 
 
-def _find_ch_axis(dataset: Well):
+def _find_ch_axis(dataset: NGFFNode):
     for i, axis in enumerate(dataset.axes):
         if axis.type == "channel":
             return i
@@ -187,6 +188,13 @@ def layers_from_arrays(
         layer = (data, kwargs, layer_type)
         layers.append(layer)
     return layers
+
+
+def fov_to_layers(fov: Position):
+    layers_kwargs = _ome_to_napari_by_channel(fov.metadata)
+    ch_axis = _find_ch_axis(fov)
+    arrays = [arr for _, arr in fov.images()]
+    return layers_from_arrays(layers_kwargs, ch_axis, arrays, mode="stitch")
 
 
 def well_to_layers(
