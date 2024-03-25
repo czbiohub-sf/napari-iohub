@@ -8,10 +8,15 @@ contributions:
     - id: napari-iohub.make_qwidget
       python_name: napari_iohub._widget:MainWidget
       title: Make main QWidget
+    - id: napari-iohub.edit_labels
+      python_name: napari_iohub._edit_labels:EditLabelsWidget
+      title: Edit labels layer for an FOV
   readers:
     - command: napari-iohub.get_reader
       accepts_directories: true
-      filename_patterns: ['*']
+      filename_patterns: ["*"]
   widgets:
     - command: napari-iohub.make_qwidget
       display_name: NGFF HCS plate visualization
+    - command: napari-iohub.edit_labels
+      display_name: Edit labels

@@ -23,6 +23,25 @@ from superqt import QRangeSlider
 from napari_iohub._reader import plate_to_layers, well_to_layers
 
 
+def _add_nav_combobox(
+    parent: QWidget, label: str, connect: Callable, form_layout: QFormLayout
+):
+    cb = QComboBox(parent)
+    label = QLabel(cb, text=label)
+    cb.currentTextChanged[str].connect(connect)
+    form_layout.addRow(label, cb)
+    return cb
+
+
+def _choose_dir(parent: QWidget, caption="Open a directory"):
+    path = QFileDialog.getExistingDirectory(
+        parent=parent,
+        caption=caption,
+        directory=os.getcwd(),
+    )
+    return path
+
+
 class QHLine(QFrame):
     def __init__(self):
         super().__init__()
@@ -33,7 +52,6 @@ class MainWidget(QWidget):
     def __init__(self, napari_viewer: napari.Viewer):
         super().__init__()
         self.viewer = napari_viewer
-        self.cwd = os.getcwd()
         self.dataset = None
         self.view_mode = "stitch"
         self.main_layout = QVBoxLayout()
@@ -71,13 +89,13 @@ class MainWidget(QWidget):
         label = QLabel(text="View all FOVs in a well")
         outer_layout.addWidget(label)
         form_layout = QFormLayout()
-        self.row_cb = self._add_nav_combobox(
-            "Row", self._load_row, form_layout
+        self.row_cb = _add_nav_combobox(
+            self, "Row", self._load_row, form_layout
         )
-        self.well_cb = self._add_nav_combobox(
-            "Well", self._load_well, form_layout
+        self.well_cb = _add_nav_combobox(
+            self, "Well", self._load_well, form_layout
         )
-        mode_cb = self._add_nav_combobox("Mode", self._view_mode, form_layout)
+        mode_cb = _add_nav_combobox(self, "Mode", self._view_mode, form_layout)
         mode_cb.addItems(["stitch", "stack"])
         mode_cb.setToolTip(
             (
@@ -103,25 +121,8 @@ class MainWidget(QWidget):
         form_layout.addRow(label, slider)
         return slider
 
-    def _add_nav_combobox(
-        self, label: str, connect: Callable, form_layout: QFormLayout
-    ):
-        cb = QComboBox(self)
-        label = QLabel(cb, text=label)
-        cb.currentTextChanged[str].connect(connect)
-        form_layout.addRow(label, cb)
-        return cb
-
-    def _choose_dir(self, caption="Open a directory"):
-        path = QFileDialog.getExistingDirectory(
-            parent=self,
-            caption=caption,
-            directory=self.cwd,
-        )
-        return path
-
     def _load_dataset(self):
-        path = self._choose_dir()
+        path = _choose_dir(self)
         logging.debug(f"Got dataset path '{path}'")
         if not path:
             return
