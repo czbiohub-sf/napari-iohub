@@ -207,7 +207,7 @@ class MainWidget(QWidget):
             # https://github.com/napari/napari/blob/7ae2404f7636ce3e1e6db1386b96c69b88a52691/napari/components/viewer_model.py#L1375-L1376 # noqa
             # constructing layer directly cause cryptic color map errors
             add_method = getattr(self.viewer, "add_" + layer_data[2].lower())
-            add_method(layer_data[0], **layer_data[1])
+            add_method(layer_data[0], **layer_data[1], blending="additive")
         axis_labels = [
             ax.name for ax in self.dataset.axes if ax.type != "channel"
         ]
