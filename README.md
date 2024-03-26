@@ -9,6 +9,8 @@
 
 OME-Zarr viewer for napari with iohub as the I/O backend.
 
+Usage documentation can be found in the [wiki](https://github.com/czbiohub-sf/napari-iohub/wiki).
+
 ----------------------------------
 
 This [napari] plugin was generated with [Cookiecutter] using [@napari]'s [cookiecutter-napari-plugin] template.
