@@ -189,9 +189,9 @@ class _SaveFOV(QWidget):
         self.dataset_path_le.setReadOnly(True)
         form.addRow(load_btn, self.dataset_path_le)
         layout.addLayout(form)
-        load_button = QPushButton(text="Save")
-        load_button.clicked.connect(self._save_image)
-        layout.addWidget(load_button)
+        save_button = QPushButton(text="Save")
+        save_button.clicked.connect(self._save_image)
+        layout.addWidget(save_button)
         self.setLayout(layout)
 
     def _load_dataset(self):
