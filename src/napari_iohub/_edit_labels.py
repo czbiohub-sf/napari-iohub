@@ -7,6 +7,7 @@ from os.path import isdir, isfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from napari import Viewer
 import numpy as np
 from iohub.ngff import Plate, Position, Row, Well, open_ome_zarr
 from qtpy.QtWidgets import (
@@ -193,6 +194,10 @@ class _SaveFOV(QWidget):
         load_button.clicked.connect(self._save_image)
         layout.addWidget(load_button)
         self.setLayout(layout)
+
+        @self.viewer.bind_key("s")
+        def _on_save(v: Viewer):
+            self._save_image()
 
     def _load_dataset(self):
         if not self.viewer.layers:
