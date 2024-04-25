@@ -255,7 +255,7 @@ def plate_to_layers(
     if col_range:
         columns = columns[col_range[0] : col_range[1]]
     boxes = [[] for _ in range(4)]
-    properties = {"well": []}
+    properties = {"fov": []}
     well_paths = [w.path for w in plate.metadata.wells]
     for i, row_meta in enumerate(rows):
         row_name = row_meta.name
@@ -276,7 +276,9 @@ def plate_to_layers(
                 ]
                 for k in range(len(boxes)):
                     boxes[k].append(box_extents[k] - 0.5)
-                properties["well"].append(well_path)
+                properties["fov"].append(
+                    well_path + "/" + next(well.positions())[0]
+                )
             else:
                 row_arrays.append(None)
         plate_arrays.append(row_arrays)
@@ -311,7 +313,7 @@ def plate_to_layers(
                 "face_color": "transparent",
                 "edge_color": "black",
                 "properties": properties,
-                "text": {"string": "well", "color": "orange"},
+                "text": {"string": "fov", "color": "orange"},
                 "name": "Plate Map",
             },
             "shapes",
