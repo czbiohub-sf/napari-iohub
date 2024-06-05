@@ -7,7 +7,12 @@
 [![codecov](https://codecov.io/gh/czbiohub/napari-iohub/branch/main/graph/badge.svg)](https://codecov.io/gh/czbiohub/napari-iohub)
 [![napari hub](https://img.shields.io/endpoint?url=https://api.napari-hub.org/shields/napari-iohub)](https://napari-hub.org/plugins/napari-iohub)
 
-OME-Zarr viewer for napari with iohub as the I/O backend.
+OME-Zarr viewer plugin for napari with iohub as the I/O backend.
+
+Widgets are provided for different visualization use cases:
+
+- Multi-well plate (high-content screening, HCS) viewer
+- Label editor
 
 Usage documentation can be found in the [wiki](https://github.com/czbiohub-sf/napari-iohub/wiki).
 
@@ -39,6 +44,10 @@ Distributed under the terms of the [BSD-3] license,
 ## Issues
 
 If you encounter any problems, please [file an issue] along with a detailed description.
+
+---
+Designed for the intracellular dashboard project
+by the Computational Microscopy team at the Chan Zuckerberg Biohub SF.
 
 [napari]: https://github.com/napari/napari
 [Cookiecutter]: https://github.com/audreyr/cookiecutter
