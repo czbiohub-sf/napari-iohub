@@ -211,6 +211,37 @@ def well_to_layers(
     )
 
 
+def make_bbox(bbox_extents):
+    """Copied from:
+    https://napari.org/stable/tutorials/segmentation/annotate_segmentation.html
+    Get the coordinates of the corners of a
+    bounding box from the extents
+
+    Parameters
+    ----------
+    bbox_extents : list (4xN)
+        List of the extents of the bounding boxes for each of the N regions.
+        Should be ordered: [min_row, min_column, max_row, max_column]
+
+    Returns
+    -------
+    bbox_rect : np.ndarray
+        The corners of the bounding box. Can be input directly into a
+        napari Shapes layer.
+    """
+    minr = bbox_extents[0]
+    minc = bbox_extents[1]
+    maxr = bbox_extents[2]
+    maxc = bbox_extents[3]
+
+    bbox_rect = np.array(
+        [[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]]
+    )
+    bbox_rect = np.moveaxis(bbox_rect, 2, 0)
+
+    return bbox_rect
+
+
 def plate_to_layers(
     plate: Plate,
     row_range: tuple[int, int] = None,
@@ -223,17 +254,31 @@ def plate_to_layers(
     columns = plate.metadata.columns
     if col_range:
         columns = columns[col_range[0] : col_range[1]]
-    for row_meta in rows:
+    boxes = [[] for _ in range(4)]
+    properties = {"fov": []}
+    well_paths = [w.path for w in plate.metadata.wells]
+    for i, row_meta in enumerate(rows):
         row_name = row_meta.name
         row_arrays = []
-        for col_meta in columns:
+        for j, col_meta in enumerate(columns):
             col_name = col_meta.name
-            if row_name + "/" + col_name in [
-                w.path for w in plate.metadata.wells
-            ]:
+            well_path = f"{row_name}/{col_name}"
+            if well_path in well_paths:
                 well = plate[row_name][col_name]
                 layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
                 row_arrays.append([a[0] for a in arrays])
+                height, width = arrays[0][0].shape[-2:]
+                box_extents = [
+                    height * i,
+                    width * j,
+                    height * (i + 1),
+                    width * (j + 1),
+                ]
+                for k in range(len(boxes)):
+                    boxes[k].append(box_extents[k] - 0.5)
+                properties["fov"].append(
+                    well_path + "/" + next(well.positions())[0]
+                )
             else:
                 row_arrays.append(None)
         plate_arrays.append(row_arrays)
@@ -254,13 +299,27 @@ def plate_to_layers(
                 row_level.append(arr)
             plate_level.append(row_level)
         plate_levels.append(da.block(plate_level))
-    return layers_from_arrays(
+    layers = layers_from_arrays(
         layers_kwargs,
         ch_axis,
         plate_levels,
         mode="stitch",
         layer_type="image",
     )
+    layers.append(
+        [
+            make_bbox(boxes),
+            {
+                "face_color": "transparent",
+                "edge_color": "black",
+                "properties": properties,
+                "text": {"string": "fov", "color": "orange"},
+                "name": "Plate Map",
+            },
+            "shapes",
+        ]
+    )
+    return layers
 
 
 def reader_function(path):
