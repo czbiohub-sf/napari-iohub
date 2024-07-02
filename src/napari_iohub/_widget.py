@@ -8,6 +8,7 @@ from napari.utils.notifications import show_info
 from qtpy.QtCore import Qt
 from superqt import QRangeSlider
 from napari_iohub._reader import plate_to_layers, well_to_layers
+import pandas as pd
 
 from qtpy.QtWidgets import (
     QComboBox,
@@ -149,9 +150,9 @@ class MainWidget(QWidget):
         self.main_layout = QVBoxLayout()
         self._add_load_data_layout()
         self.main_layout.addWidget(QHLine())
-        self._add_plate_layout()
+        self._add_metadata_layout()
         self.main_layout.addWidget(QHLine())
-        self._select_well_metadata_layout()
+        self._add_plate_layout()
         self.main_layout.addWidget(QHLine())
         self._add_well_layout()
         self.setLayout(self.main_layout)
@@ -234,9 +235,7 @@ class MainWidget(QWidget):
         outer_layout.addWidget(self.view_well_btn)
         self.main_layout.addLayout(outer_layout)
 
-    def _select_well_metadata_layout(
-        self, meta_list: Optional[List[str]] = None
-    ):
+    def _add_metadata_layout(self, meta_list: Optional[List[str]] = None):
         """
         Add the layout for selecting wells by metadata.
 
@@ -249,7 +248,7 @@ class MainWidget(QWidget):
             The list of well metadata names, by default None.
         """
         outer_layout = QVBoxLayout()
-        label = QLabel(text="Filter wells by metadata")
+        label = QLabel(text="Select metadata")
         outer_layout.addWidget(label)
         form_layout = QFormLayout()
         self.meta1_cb = _add_nav_combobox(
@@ -270,8 +269,8 @@ class MainWidget(QWidget):
                     form_layout,
                 )
                 setattr(self, f"meta{i}_cb", meta_cb)
-        filter_btn = QPushButton("Filter Wells")
-        form_layout.addRow(filter_btn)
+        # filter_btn = QPushButton("Filter wells by metadata") #Not implemented yet.
+        # form_layout.addRow(filter_btn)
         outer_layout.addLayout(form_layout)
         self.main_layout.addLayout(outer_layout)
 
@@ -338,6 +337,7 @@ class MainWidget(QWidget):
         Load the metadata file.
 
         This method opens a file dialog to select an Excel file containing the metadata.
+        It then reads the file and saves the column headings in self.meta_list.
         """
         path = QFileDialog.getOpenFileName(
             self,
@@ -349,6 +349,17 @@ class MainWidget(QWidget):
         if not path:
             return
         self.metadata_path_le.setText(path)
+
+        try:
+            workbook = pd.read_excel(path)
+            self.meta_list = list(workbook.columns)
+        except Exception as e:
+            logging.error(f"Error loading metadata file: {e}")
+            return
+
+        self.meta1_cb.addItems(self.meta_list)
+        self.meta2_cb.addItems(self.meta_list)
+        self.meta3_cb.addItems(self.meta_list)
 
     def _show_plate(self):
         """
