@@ -17,6 +17,7 @@ from iohub.ngff import (
     open_ome_zarr,
 )
 from pydantic.color import Color
+import pandas as pd
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
@@ -246,6 +247,7 @@ def plate_to_layers(
     plate: Plate,
     row_range: tuple[int, int] = None,
     col_range: tuple[int, int] = None,
+    # metadata_df: pd.DataFrame = None, This requires passing a state from widget to reader. Is this the best approach?
 ):
     plate_arrays = []
     rows = plate.metadata.rows

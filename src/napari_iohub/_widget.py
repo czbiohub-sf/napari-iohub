@@ -248,7 +248,7 @@ class MainWidget(QWidget):
             The list of well metadata names, by default None.
         """
         outer_layout = QVBoxLayout()
-        label = QLabel(text="Select metadata")
+        label = QLabel(text="Overlay metadata")
         outer_layout.addWidget(label)
         form_layout = QFormLayout()
         self.meta1_cb = _add_nav_combobox(
@@ -351,8 +351,8 @@ class MainWidget(QWidget):
         self.metadata_path_le.setText(path)
 
         try:
-            workbook = pd.read_excel(path)
-            self.meta_list = list(workbook.columns)
+            self.metadata_df = pd.read_excel(path)
+            self.meta_list = list(self.metadata_df.columns)
         except Exception as e:
             logging.error(f"Error loading metadata file: {e}")
             return
@@ -379,6 +379,8 @@ class MainWidget(QWidget):
             row_range=row_range,
             col_range=col_range,
         )
+
+        # We could pass the metadata_df to the worker here and have it update the Plate Layout layer. Is that the best approach to overlay the metadata?
         worker.returned.connect(self._update_layers)
         logging.debug("Starting plate data loading worker")
         worker.start()
