@@ -161,15 +161,27 @@ class MainWidget(QWidget):
         Add the layout for loading the dataset.
 
         This layout includes a button to load the dataset, a line edit widget to display the path of the loaded dataset,
-        and a tooltip for the load button.
+        a button to load the metadata file, and a tooltip for the load buttons.
         """
         form_layout = QFormLayout()
-        load_btn = QPushButton("Load dataset")
-        load_btn.clicked.connect(self._load_dataset)
-        load_btn.setToolTip("Select a directory of the NGFF HCS plate dataset")
+        load_zarr_btn = QPushButton("Load zarr store")
+        load_zarr_btn.clicked.connect(self._load_dataset)
+        load_zarr_btn.setToolTip(
+            "Select a directory of the NGFF HCS plate zarr store."
+        )
         self.dataset_path_le = QLineEdit()
         self.dataset_path_le.setReadOnly(True)
-        form_layout.addRow(load_btn, self.dataset_path_le)
+        form_layout.addRow(load_zarr_btn, self.dataset_path_le)
+
+        load_metadata_btn = QPushButton("Load metadata file")
+        load_metadata_btn.clicked.connect(self._load_metadata)
+        load_metadata_btn.setToolTip(
+            "Select an Excel file containing the metadata."
+        )
+        self.metadata_path_le = QLineEdit()
+        self.metadata_path_le.setReadOnly(True)
+        form_layout.addRow(load_metadata_btn, self.metadata_path_le)
+
         self.main_layout.addLayout(form_layout)
 
     def _add_plate_layout(self):
@@ -320,6 +332,23 @@ class MainWidget(QWidget):
         self.col_range_rs.setValue(cr)
         self.view_plate_btn.clicked.connect(self._show_plate)
         self.view_well_btn.clicked.connect(self._show_well)
+
+    def _load_metadata(self):
+        """
+        Load the metadata file.
+
+        This method opens a file dialog to select an Excel file containing the metadata.
+        """
+        path = QFileDialog.getOpenFileName(
+            self,
+            "Open metadata file",
+            os.getcwd(),
+            "Excel files (*.xlsx *.xls)",
+        )[0]
+        logging.debug(f"Got metadata path '{path}'")
+        if not path:
+            return
+        self.metadata_path_le.setText(path)
 
     def _show_plate(self):
         """
