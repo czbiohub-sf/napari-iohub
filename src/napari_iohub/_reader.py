@@ -247,8 +247,22 @@ def plate_to_layers(
     plate: Plate,
     row_range: tuple[int, int] = None,
     col_range: tuple[int, int] = None,
-    # metadata_df: pd.DataFrame = None, This requires passing a state from widget to reader. Is this the best approach?
+    metadata_df: pd.DataFrame = None,
+    meta_list: list = None,
 ):
+    """
+    Convert a Plate object to a list of layers for visualization in napari.
+
+    Args:
+        plate (Plate): The Plate object to convert.
+        row_range (tuple[int, int], optional): The range of rows to include. Defaults to None.
+        col_range (tuple[int, int], optional): The range of columns to include. Defaults to None.
+        metadata_df (pd.DataFrame, optional): The metadata DataFrame. Defaults to None.
+        meta_list (list, optional): The list of metadata. Defaults to None.
+
+    Returns:
+        list: A list of layers for visualization in napari.
+    """
     plate_arrays = []
     rows = plate.metadata.rows
     if row_range:
@@ -267,6 +281,7 @@ def plate_to_layers(
             well_path = f"{row_name}/{col_name}"
             if well_path in well_paths:
                 well = plate[row_name][col_name]
+                # Stack the well images by position
                 layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
                 row_arrays.append([a[0] for a in arrays])
                 height, width = arrays[0][0].shape[-2:]
@@ -276,16 +291,26 @@ def plate_to_layers(
                     height * (i + 1),
                     width * (j + 1),
                 ]
+                # Calculate the bounding box extents for each well
                 for k in range(len(boxes)):
                     boxes[k].append(box_extents[k] - 0.5)
+                # Add the well path and position to the properties dictionary
+                well_id = well_path + "/" + next(well.positions())[0]
+                meta_value = metadata_df.loc[
+                    metadata_df["Well ID"] == row_name + col_name, meta_list
+                ].values[0]
+                meta_value = "\n".join(meta_value)
                 properties["fov"].append(
-                    well_path + "/" + next(well.positions())[0]
+                    well_id + "/" + next(well.positions())[0] + meta_value
                 )
             else:
                 row_arrays.append(None)
         plate_arrays.append(row_arrays)
+
+    # Get the shape and dtype of the first non-empty block
     first_blocks = next(a for a in plate_arrays[0] if a is not None)
     fill_args = [(b.shape, b.dtype) for b in first_blocks]
+
     plate_levels = []
     for level, _ in enumerate(first_blocks):
         plate_level = []
@@ -293,6 +318,7 @@ def plate_to_layers(
             row_level = []
             for c in r:
                 if c is None:
+                    # Create an empty block with the same shape and dtype
                     arr = da.zeros(
                         shape=fill_args[level][0], dtype=fill_args[level][1]
                     )
@@ -300,7 +326,10 @@ def plate_to_layers(
                     arr = c[level]
                 row_level.append(arr)
             plate_level.append(row_level)
+        # Block the row levels to create the plate level
         plate_levels.append(da.block(plate_level))
+
+    # Create layers from the plate levels
     layers = layers_from_arrays(
         layers_kwargs,
         ch_axis,
@@ -308,6 +337,8 @@ def plate_to_layers(
         mode="stitch",
         layer_type="image",
     )
+
+    # Add a plate map layer with bounding boxes and properties
     layers.append(
         [
             make_bbox(boxes),
@@ -315,12 +346,13 @@ def plate_to_layers(
                 "face_color": "transparent",
                 "edge_color": "black",
                 "properties": properties,
-                "text": {"string": "fov", "color": "orange"},
+                "text": {"string": "fov", "color": "white"},
                 "name": "Plate Map",
             },
             "shapes",
         ]
     )
+
     return layers
 
 
