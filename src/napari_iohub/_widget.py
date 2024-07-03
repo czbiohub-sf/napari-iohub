@@ -378,6 +378,8 @@ class MainWidget(QWidget):
             plate=self.dataset,
             row_range=row_range,
             col_range=col_range,
+            metadata_df=self.metadata_df,
+            meta_list=self.meta_list,
         )
 
         # We could pass the metadata_df to the worker here and have it update the Plate Layout layer. Is that the best approach to overlay the metadata?

@@ -296,10 +296,14 @@ def plate_to_layers(
                     boxes[k].append(box_extents[k] - 0.5)
                 # Add the well path and position to the properties dictionary
                 well_id = well_path + "/" + next(well.positions())[0]
-                meta_value = metadata_df.loc[
-                    metadata_df["Well ID"] == row_name + col_name, meta_list
-                ].values[0]
-                meta_value = "\n".join(meta_value)
+                meta_value = ""
+
+                # FIXME: Figure out parsing of metadata values from supplied keys.
+                # meta_value = metadata_df.loc[
+                #     metadata_df["Well ID"] == row_name + col_name, meta_list
+                # ].values[0]
+                # meta_value = "\n".join(meta_value)
+
                 properties["fov"].append(
                     well_id + "/" + next(well.positions())[0] + meta_value
                 )
