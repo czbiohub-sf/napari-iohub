@@ -26,7 +26,6 @@ if TYPE_CHECKING:
     import napari
     from napari.types import LayerData
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
 
 
 class _LoadFOV(QWidget):
