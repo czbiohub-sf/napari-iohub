@@ -37,7 +37,7 @@ def open_image_and_tracks(
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
     image_layers = fov_to_layers(image_fov)
-    _logger.info(f"Loading tracks from {tracks_dataset}")
+    _logger.info(f"Loading tracking labels from {tracks_dataset}")
     tracks_plate = open_ome_zarr(tracks_dataset)
     tracks_fov = tracks_plate[fov_name]
     labels_layer = fov_to_layers(tracks_fov, layer_type="labels")[0]
@@ -46,7 +46,7 @@ def open_image_and_tracks(
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
     tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
-    _logger.info(f"Loading tracks from {str(tracks_csv)}")
+    _logger.info(f"Loading tracking features from {str(tracks_csv)}")
     # TODO: replace with real features
     df = pd.read_csv(tracks_csv)
     features = df[["track_id", "t", "y", "x"]].rename(
