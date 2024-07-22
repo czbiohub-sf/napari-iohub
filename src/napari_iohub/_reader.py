@@ -80,8 +80,8 @@ def stitch_well_by_channel(well: Well, row_wrap: int):
     levels = []
     pyramids: list[list] = []
     for i, (_, pos) in enumerate(well.positions()):
-        l, ims = _get_multiscales(pos)
-        levels.append(l)
+        lv, ims = _get_multiscales(pos)
+        levels.append(lv)
         pyramids.append(ims)
         if i == 0:
             layers_kwargs = _ome_to_napari_by_channel(pos.metadata)
@@ -98,8 +98,8 @@ def stack_well_by_position(well: Well):
     levels = []
     pyramids: list[list] = []
     for i, (_, pos) in enumerate(well.positions()):
-        l, ims = _get_multiscales(pos)
-        levels.append(l)
+        lv, ims = _get_multiscales(pos)
+        levels.append(lv)
         pyramids.append(ims)
         if i == 0:
             layers_kwargs = _ome_to_napari_by_channel(pos.metadata)
