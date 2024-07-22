@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import pathlib
+import typing
 from typing import TYPE_CHECKING
 
 import numpy as np
@@ -31,8 +32,7 @@ def open_image_and_tracks(
     tracks_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/track_labels_final.zarr",
     fov_name: str = "B/4/4",
     expand_z_for_tracks: bool = True,
-    points_z_position: int = 36,
-) -> list[napari.types.LayerDataTuple]:
+) -> typing.List[napari.types.LayerDataTuple]:
     _logger.info(f"Loading images from {images_dataset}")
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
@@ -45,21 +45,17 @@ def open_image_and_tracks(
         image_z = image_fov["0"].slices
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-    image_layers.append(labels_layer)
     tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
     _logger.info(f"Loading tracks from {str(tracks_csv)}")
     df = pd.read_csv(tracks_csv)
-    if expand_z_for_tracks:
-        df["z"] = np.ones_like(df["t"].to_numpy()) * points_z_position
-    elif "z" not in df.columns:
-        raise ValueError(
-            "Tracks CSV must contain a 'z' column when not expanding Z."
-        )
-    points = df[["t", "z", "y", "x"]]
-    features = df[["t", "y", "x"]].rename(
-        columns={"t": "frame", "y": "centroid_y", "x": "centroid_x"}
+    features = df[["track_id", "t", "y", "x"]].rename(
+        columns={
+            "track_id": "label",
+            "t": "frame",
+            "y": "centroid_y",
+            "x": "centroid_x",
+        }
     )
-    image_layers.append(
-        (points, {"name": "Tracked nodes", "features": features}, "points")
-    )
+    labels_layer[1]["features"] = features
+    image_layers.append(labels_layer)
     return image_layers
