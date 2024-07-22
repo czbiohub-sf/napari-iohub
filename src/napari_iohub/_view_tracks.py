@@ -47,6 +47,7 @@ def open_image_and_tracks(
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
     tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
     _logger.info(f"Loading tracks from {str(tracks_csv)}")
+    # TODO: replace with real features
     df = pd.read_csv(tracks_csv)
     features = df[["track_id", "t", "y", "x"]].rename(
         columns={
