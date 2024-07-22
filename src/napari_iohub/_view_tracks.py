@@ -28,10 +28,10 @@ def _zarr_modes(label: str) -> dict[str, str]:
     tracks_dataset=_zarr_modes("Tracking labels"),
 )
 def open_image_and_tracks(
-    images_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr",
-    tracks_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/track_labels_final.zarr",
-    fov_name: str = "B/4/4",
-    expand_z_for_tracks: bool = True,
+    images_dataset: pathlib.Path,
+    tracks_dataset: pathlib.Path,
+    fov_name: str,
+    expand_z_for_tracking_labels: bool = True,
 ) -> typing.List[napari.types.LayerDataTuple]:
     _logger.info(f"Loading images from {images_dataset}")
     image_plate = open_ome_zarr(images_dataset)
@@ -41,7 +41,7 @@ def open_image_and_tracks(
     tracks_plate = open_ome_zarr(tracks_dataset)
     tracks_fov = tracks_plate[fov_name]
     labels_layer = fov_to_layers(tracks_fov, layer_type="labels")[0]
-    if expand_z_for_tracks:
+    if expand_z_for_tracking_labels:
         image_z = image_fov["0"].slices
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
