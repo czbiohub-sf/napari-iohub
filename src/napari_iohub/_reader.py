@@ -136,12 +136,12 @@ def _make_grid(elements: list[da.Array], cols: int):
     return grid
 
 
-def _ome_to_napari_by_channel(metadata):
+def _ome_to_napari_by_channel(metadata, parse_colormap: bool = True):
     omero: OMEROMeta = metadata.omero
     layers_kwargs = []
     for channel in omero.channels:
         metadata = {"name": channel.label}
-        if channel.color:
+        if channel.color and parse_colormap:
             # alpha channel is optional
             rgb = Color(channel.color).as_rgb_tuple(alpha=None)
             start = [0.0] * 3
@@ -153,6 +153,7 @@ def _ome_to_napari_by_channel(metadata):
                     [v / np.iinfo(np.uint8).max for v in rgb],
                 ]
             )
+            metadata["blending"] = "additive"
         layers_kwargs.append(metadata)
     return layers_kwargs
 
@@ -190,11 +191,15 @@ def layers_from_arrays(
     return layers
 
 
-def fov_to_layers(fov: Position):
-    layers_kwargs = _ome_to_napari_by_channel(fov.metadata)
+def fov_to_layers(fov: Position, layer_type: str = "image"):
+    layers_kwargs = _ome_to_napari_by_channel(
+        fov.metadata, parse_colormap=(layer_type == "image")
+    )
     ch_axis = _find_ch_axis(fov)
     arrays = [arr for _, arr in fov.images()]
-    return layers_from_arrays(layers_kwargs, ch_axis, arrays, mode="stitch")
+    return layers_from_arrays(
+        layers_kwargs, ch_axis, arrays, mode="stitch", layer_type=layer_type
+    )
 
 
 def well_to_layers(
