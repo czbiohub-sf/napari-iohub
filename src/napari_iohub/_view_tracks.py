@@ -26,11 +26,13 @@ def _zarr_modes(label: str) -> dict[str, str]:
     call_button="Load",
     images_dataset=_zarr_modes("Images (Plate)"),
     tracks_dataset=_zarr_modes("Tracking labels"),
+    embeddings_dir=_zarr_modes("Embeddings"),
 )
 def open_image_and_tracks(
-    images_dataset: pathlib.Path,
-    tracks_dataset: pathlib.Path,
-    fov_name: str,
+    images_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr",
+    tracks_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/track_labels_final.zarr",
+    embeddings_dir: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/test_visualizations",
+    fov_name: str = "B/4/2",
     expand_z_for_tracking_labels: bool = True,
 ) -> typing.List[napari.types.LayerDataTuple]:
     _logger.info(f"Loading images from {images_dataset}")
@@ -46,17 +48,24 @@ def open_image_and_tracks(
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
     tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
-    _logger.info(f"Loading tracking features from {str(tracks_csv)}")
-    # TODO: replace with real features
-    df = pd.read_csv(tracks_csv)
-    features = df[["track_id", "t", "y", "x"]].rename(
-        columns={
-            "track_id": "label",
-            "t": "frame",
-            "y": "centroid_y",
-            "x": "centroid_x",
-        }
+    _logger.info(
+        f"Loading features from {str(tracks_csv)} and ({str(embeddings_dir)})"
     )
+    df = pd.read_csv(tracks_csv)
+    features = df[["track_id", "t"]].rename(
+        columns={"track_id": "label", "t": "frame"}
+    )
+    embedding_path = (
+        embeddings_dir
+        / fov_name
+        / "before_projected_embeddings"
+        / "test_epoch88_predicted_features.npy"
+    )
+    _logger.debug(f"Loading embeddings from {str(embedding_path)}")
+    embeddings_unprojected = np.load(embedding_path)
+    features[
+        [f"embedding_{i}" for i in range(embeddings_unprojected.shape[1])]
+    ] = embeddings_unprojected
     labels_layer[1]["features"] = features
     image_layers.append(labels_layer)
     return image_layers
