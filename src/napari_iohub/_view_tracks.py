@@ -24,17 +24,49 @@ def _zarr_modes(label: str) -> dict[str, str]:
 
 @magic_factory(
     call_button="Load",
-    images_dataset=_zarr_modes("Images (Plate)"),
-    tracks_dataset=_zarr_modes("Tracking labels"),
-    embeddings_dir=_zarr_modes("Embeddings"),
+    images_dataset=_zarr_modes("images (late)"),
+    tracks_dataset=_zarr_modes("tracking labels"),
+    features_dir=_zarr_modes("features directory"),
 )
 def open_image_and_tracks(
-    images_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/2.1-register/registered.zarr",
-    tracks_dataset: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/track_labels_final.zarr",
-    embeddings_dir: pathlib.Path = "/hpc/projects/intracellular_dashboard/viral-sensor/2024_02_04_A549_DENV_ZIKV_timelapse/5-finaltrack/test_visualizations",
-    fov_name: str = "B/4/2",
+    images_dataset: pathlib.Path,
+    tracks_dataset: pathlib.Path,
+    features_dir: pathlib.Path,
+    fov_name: str,
+    features_type: str,
+    features_name: str,
     expand_z_for_tracking_labels: bool = True,
 ) -> typing.List[napari.types.LayerDataTuple]:
+    """
+    Load images and tracking labels.
+    Also load features from a directory and associate them with the tracking labels.
+    To be used with napari-clusters-plotter plugin.
+
+    Parameters
+    ----------
+    images_dataset : pathlib.Path
+        Path to the images dataset (HCS OME-Zarr).
+    tracks_dataset : pathlib.Path
+        Path to the tracking labels dataset (HCS OME-Zarr).
+        Potentially with a singleton Z dimension.
+    features_dir : pathlib.Path
+        Path to the directory containing the features.
+        Has the same directory structure as the HCS stores.
+    fov_name : str
+        Name of the FOV to load, e.g. `"A/12/2"`.
+    features_type : str
+        Name of the subdirectory containing the feature files.
+    features_name : str
+        Name of the `.npy` feature file.
+    expand_z_for_tracking_labels : bool
+        Whether to expand the tracking labels to the Z dimension of the images.
+
+    Returns
+    -------
+    List[napari.types.LayerDataTuple]
+        List of layers to add to the viewer.
+        (image layers and one labels layer)
+    """
     _logger.info(f"Loading images from {images_dataset}")
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
@@ -48,24 +80,18 @@ def open_image_and_tracks(
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
     tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
-    _logger.info(
-        f"Loading features from {str(tracks_csv)} and ({str(embeddings_dir)})"
-    )
+    _logger.info(f"Loading tracks from {str(tracks_csv)}")
     df = pd.read_csv(tracks_csv)
-    features = df[["track_id", "t"]].rename(
+    tracks = df[["track_id", "t"]].rename(
         columns={"track_id": "label", "t": "frame"}
     )
-    embedding_path = (
-        embeddings_dir
-        / fov_name
-        / "before_projected_embeddings"
-        / "test_epoch88_predicted_features.npy"
+    features_match = features_dir / fov_name / features_type / features_name
+    _logger.info(f"Loading features from {str(features_match)}")
+    features_data = np.load(features_match)
+    features = pd.DataFrame(
+        features_data,
+        columns=[f"feature_{i}" for i in range(features_data.shape[1])],
     )
-    _logger.debug(f"Loading embeddings from {str(embedding_path)}")
-    embeddings_unprojected = np.load(embedding_path)
-    features[
-        [f"embedding_{i}" for i in range(embeddings_unprojected.shape[1])]
-    ] = embeddings_unprojected
-    labels_layer[1]["features"] = features
+    labels_layer[1]["features"] = pd.concat([tracks, features], axis=1)
     image_layers.append(labels_layer)
     return image_layers
