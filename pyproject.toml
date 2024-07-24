@@ -1,12 +1,63 @@
 [build-system]
-requires = ["setuptools>=42.0.0", "wheel"]
+requires = ["setuptools>=42.0.0", "setuptools-scm[toml]"]
 build-backend = "setuptools.build_meta"
 
+[project]
+name = "napari-iohub"
+description = "OME-Zarr viewer for napari with iohub as the I/O backend"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { file = "LICENSE" }
+authors = [
+    { name = "CZ Biohub SF and napari-iohub contributors", email = "iohub@czbiohub.org" },
+]
+dependencies = ["iohub==0.1.0", "magicgui", "qtpy"]
+dynamic = ["version"]
+classifiers = [
+    "Development Status :: 2 - Pre-Alpha",
+    "Framework :: napari",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: BSD License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Image Processing",
+]
 
+[project.optional-dependencies]
+clustering = ["napari-clusters-plotter"]
+all = ["napari[all]<0.5", "napari-clusters-plotter"]
+dev = [
+    "tox",
+    "pytest",
+    "pytest-cov",
+    "pytest-qt",
+    "black",
+    "ruff",
+    "napari-iohub[all]",
+]
+
+[project.entry-points."napari.manifest"]
+"napari-iohub" = "napari_iohub:napari.yaml"
+
+[tool.setuptools_scm]
+write_to = "src/napari_iohub/_version.py"
+
+[tool.setuptools]
+include-package-data = true
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+"*" = ["*.yaml"]
 
 [tool.black]
 line-length = 79
 
-[tool.isort]
-profile = "black"
-line_length = 79
+[tool.ruff]
+src = ["src"]
+lint.extend-select = ["I001"]
+lint.isort.known-first-party = ["napari_iohub"]
