@@ -6,9 +6,9 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from napari import Viewer
 import numpy as np
 from iohub.ngff import Plate, Position, Row, Well, open_ome_zarr
+from napari import Viewer
 from qtpy.QtWidgets import (
     QFileDialog,
     QFormLayout,

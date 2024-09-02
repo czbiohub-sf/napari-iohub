@@ -10,9 +10,9 @@ from iohub.ngff import (
     MultiScaleMeta,
     NGFFNode,
     OMEROMeta,
+    Plate,
     Position,
     Well,
-    Plate,
     _open_store,
     open_ome_zarr,
 )
@@ -69,9 +69,7 @@ def _get_node(path: StrOrBytesPath):
         zgroup.store.close()
         node = open_ome_zarr(store_path=path, layout="hcs", mode="r")
     else:
-        raise KeyError(
-            f"NGFF plate or well metadata not found under '{zgroup.name}'"
-        )
+        raise KeyError(f"NGFF plate or well metadata not found under '{zgroup.name}'")
     return node
 
 
@@ -118,9 +116,7 @@ def _get_multiscales(pos: Position):
         try:
             multiscales.append(da.from_zarr(pos[im]))
         except Exception as e:
-            logging.warning(
-                f"Skipped array '{im}' at position {pos.zgroup.name}: {e}"
-            )
+            logging.warning(f"Skipped array '{im}' at position {pos.zgroup.name}: {e}")
     return len(multiscales), multiscales
 
 
@@ -202,13 +198,9 @@ def fov_to_layers(fov: Position, layer_type: str = "image"):
     )
 
 
-def well_to_layers(
-    well: Well, mode: Literal["stitch", "stack"], layer_type: str
-):
+def well_to_layers(well: Well, mode: Literal["stitch", "stack"], layer_type: str):
     if mode == "stitch":
-        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(
-            well, row_wrap=4
-        )
+        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(well, row_wrap=4)
     elif mode == "stack":
         layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
     return layers_from_arrays(
@@ -239,9 +231,7 @@ def make_bbox(bbox_extents):
     maxr = bbox_extents[2]
     maxc = bbox_extents[3]
 
-    bbox_rect = np.array(
-        [[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]]
-    )
+    bbox_rect = np.array([[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]])
     bbox_rect = np.moveaxis(bbox_rect, 2, 0)
 
     return bbox_rect
@@ -281,9 +271,7 @@ def plate_to_layers(
                 ]
                 for k in range(len(boxes)):
                     boxes[k].append(box_extents[k] - 0.5)
-                properties["fov"].append(
-                    well_path + "/" + next(well.positions())[0]
-                )
+                properties["fov"].append(well_path + "/" + next(well.positions())[0])
             else:
                 row_arrays.append(None)
         plate_arrays.append(row_arrays)
@@ -296,9 +284,7 @@ def plate_to_layers(
             row_level = []
             for c in r:
                 if c is None:
-                    arr = da.zeros(
-                        shape=fill_args[level][0], dtype=fill_args[level][1]
-                    )
+                    arr = da.zeros(shape=fill_args[level][0], dtype=fill_args[level][1])
                 else:
                     arr = c[level]
                 row_level.append(arr)
