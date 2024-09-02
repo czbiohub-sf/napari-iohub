@@ -28,7 +28,7 @@ classifiers = [
 
 [project.optional-dependencies]
 clustering = ["napari-clusters-plotter"]
-all = ["napari[all]<0.5", "napari-clusters-plotter"]
+all = ["napari[all]", "napari-clusters-plotter"]
 dev = [
     "tox",
     "pytest",
