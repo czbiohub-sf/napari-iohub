@@ -5,10 +5,11 @@ import pathlib
 import typing
 from typing import TYPE_CHECKING
 
-import numpy as np
 import pandas as pd
 from iohub.ngff import open_ome_zarr
 from magicgui import magic_factory
+from ultrack.reader.napari_reader import read_csv
+from xarray import open_zarr
 
 from napari_iohub._reader import fov_to_layers
 
@@ -31,10 +32,9 @@ def _zarr_modes(label: str) -> dict[str, str]:
 def open_image_and_tracks(
     images_dataset: pathlib.Path,
     tracks_dataset: pathlib.Path,
-    features_dir: pathlib.Path,
+    features_dataset: pathlib.Path,
     fov_name: str,
     features_type: str,
-    features_name: str,
     expand_z_for_tracking_labels: bool = True,
 ) -> typing.List[napari.types.LayerDataTuple]:
     """
@@ -49,15 +49,12 @@ def open_image_and_tracks(
     tracks_dataset : pathlib.Path
         Path to the tracking labels dataset (HCS OME-Zarr).
         Potentially with a singleton Z dimension.
-    features_dir : pathlib.Path
-        Path to the directory containing the features.
-        Has the same directory structure as the HCS stores.
+    features_dataset : pathlib.Path
+        Path to the predicted embeddings.
     fov_name : str
         Name of the FOV to load, e.g. `"A/12/2"`.
     features_type : str
         Name of the subdirectory containing the feature files.
-    features_name : str
-        Name of the `.npy` feature file.
     expand_z_for_tracking_labels : bool
         Whether to expand the tracking labels to the Z dimension of the images.
 
@@ -71,6 +68,12 @@ def open_image_and_tracks(
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
     image_layers = fov_to_layers(image_fov)
+    _logger.info(f"Loading {features_type} from {str(features_dataset)}")
+    features = (
+        open_zarr(features_dataset)
+        .set_index(sample=["fov_name", "track_id"])[features_type]
+        .sel(fov_name=fov_name)
+    )
     _logger.info(f"Loading tracking labels from {tracks_dataset}")
     tracks_plate = open_ome_zarr(tracks_dataset)
     tracks_fov = tracks_plate[fov_name]
@@ -81,17 +84,17 @@ def open_image_and_tracks(
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
     tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
     _logger.info(f"Loading tracks from {str(tracks_csv)}")
+    tracks_layer = read_csv(tracks_csv)
+    image_layers.append(tracks_layer)
     df = pd.read_csv(tracks_csv)
-    tracks = df[["track_id", "t"]].rename(
-        columns={"track_id": "label", "t": "frame"}
+    tracks = (
+        df[["track_id", "t"]]
+        .rename(columns={"track_id": "label", "t": "frame"})
+        .set_index("track_id")
     )
-    features_match = features_dir / fov_name / features_type / features_name
-    _logger.info(f"Loading features from {str(features_match)}")
-    features_data = np.load(features_match)
-    features = pd.DataFrame(
-        features_data,
-        columns=[f"feature_{i}" for i in range(features_data.shape[1])],
-    )
-    labels_layer[1]["features"] = pd.concat([tracks, features], axis=1)
+    tracks = tracks[features["track_id"]].reset_index()
+    labels_layer[1]["features"] = pd.DataFrame(
+        index=tracks, data=features.values
+    ).reset_index()
     image_layers.append(labels_layer)
     return image_layers
