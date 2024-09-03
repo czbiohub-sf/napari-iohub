@@ -25,9 +25,9 @@ def _zarr_modes(label: str) -> dict[str, str]:
 
 @magic_factory(
     call_button="Load",
-    images_dataset=_zarr_modes("images (late)"),
-    tracks_dataset=_zarr_modes("tracking labels"),
-    features_dir=_zarr_modes("features directory"),
+    images_dataset=_zarr_modes("images (.zarr)"),
+    tracks_dataset=_zarr_modes("tracking labels (.zarr)"),
+    features_dataset=_zarr_modes("features (.zarr)"),
 )
 def open_image_and_tracks(
     images_dataset: pathlib.Path,
@@ -36,6 +36,7 @@ def open_image_and_tracks(
     fov_name: str,
     features_type: str,
     expand_z_for_tracking_labels: bool = True,
+    load_tracks_layer: bool = True,
 ) -> typing.List[napari.types.LayerDataTuple]:
     """
     Load images and tracking labels.
@@ -71,7 +72,7 @@ def open_image_and_tracks(
     _logger.info(f"Loading {features_type} from {str(features_dataset)}")
     features = (
         open_zarr(features_dataset)
-        .set_index(sample=["fov_name", "track_id"])[features_type]
+        .set_index(sample=["fov_name", "track_id", "t"])[features_type]
         .sel(fov_name=fov_name)
     )
     _logger.info(f"Loading tracking labels from {tracks_dataset}")
@@ -82,19 +83,19 @@ def open_image_and_tracks(
         image_z = image_fov["0"].slices
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-    tracks_csv = next((tracks_dataset / fov_name).glob("*.csv"))
-    _logger.info(f"Loading tracks from {str(tracks_csv)}")
-    tracks_layer = read_csv(tracks_csv)
-    image_layers.append(tracks_layer)
-    df = pd.read_csv(tracks_csv)
-    tracks = (
-        df[["track_id", "t"]]
-        .rename(columns={"track_id": "label", "t": "frame"})
-        .set_index("track_id")
-    )
-    tracks = tracks[features["track_id"]].reset_index()
     labels_layer[1]["features"] = pd.DataFrame(
-        index=tracks, data=features.values
+        index=features["sample"]
+        .to_dataframe()
+        .reset_index(drop=True)
+        .rename(columns={"track_id": "label", "t": "frame"}),
+        data=features.values,
     ).reset_index()
     image_layers.append(labels_layer)
+    tracks_csv = next((tracks_dataset / fov_name.strip("/")).glob("*.csv"))
+    if load_tracks_layer:
+        _logger.info(f"Loading tracks from {str(tracks_csv)} with ultrack")
+        tracks_layer = read_csv(tracks_csv)
+        image_layers.append(tracks_layer)
+    _logger.info(f"Finished loading {len(image_layers)} layers")
+    _logger.debug(f"Layers: {image_layers}")
     return image_layers
