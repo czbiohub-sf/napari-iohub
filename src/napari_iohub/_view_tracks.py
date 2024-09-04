@@ -34,7 +34,7 @@ def open_image_and_tracks(
     tracks_dataset: pathlib.Path,
     features_dataset: pathlib.Path,
     fov_name: str,
-    features_type: str,
+    features_type: str = "features",
     expand_z_for_tracking_labels: bool = True,
     load_tracks_layer: bool = True,
 ) -> typing.List[napari.types.LayerDataTuple]:
@@ -83,13 +83,16 @@ def open_image_and_tracks(
         image_z = image_fov["0"].slices
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-    labels_layer[1]["features"] = pd.DataFrame(
-        index=features["sample"]
+    features_index = (
+        features["sample"]
         .to_dataframe()
-        .reset_index(drop=True)
-        .rename(columns={"track_id": "label", "t": "frame"}),
-        data=features.values,
-    ).reset_index()
+        .reset_index(drop=True)[["track_id", "t"]]
+        .rename(columns={"track_id": "label", "t": "frame"})
+    )
+    features_values = pd.DataFrame(
+        data=features.values, columns=[f"feature_{i}" for i in range(features.shape[1])]
+    ).reset_index(drop=True)
+    labels_layer[1]["features"] = pd.concat([features_index, features_values], axis=1)
     image_layers.append(labels_layer)
     tracks_csv = next((tracks_dataset / fov_name.strip("/")).glob("*.csv"))
     if load_tracks_layer:
