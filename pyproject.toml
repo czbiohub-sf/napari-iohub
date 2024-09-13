@@ -11,7 +11,7 @@ license = { file = "LICENSE" }
 authors = [
     { name = "CZ Biohub SF and napari-iohub contributors", email = "iohub@czbiohub.org" },
 ]
-dependencies = ["iohub==0.1.0", "magicgui", "qtpy"]
+dependencies = ["iohub>=0.1.0", "magicgui", "qtpy"]
 dynamic = ["version"]
 classifiers = [
     "Development Status :: 2 - Pre-Alpha",
@@ -27,8 +27,8 @@ classifiers = [
 ]
 
 [project.optional-dependencies]
-clustering = ["napari-clusters-plotter"]
-all = ["napari[all]", "napari-clusters-plotter"]
+clustering = ["napari-clusters-plotter", "ultrack", "iohub==0.2.0a1"]
+all = ["napari[all]", "napari-iohub[clustering]"]
 dev = [
     "tox",
     "pytest",

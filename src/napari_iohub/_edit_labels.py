@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 import numpy as np
-from iohub.ngff import Plate, Position, Row, Well, open_ome_zarr
+from iohub.ngff.nodes import Plate, Position, Row, Well, open_ome_zarr
 from napari import Viewer
 from qtpy.QtWidgets import (
     QFileDialog,
