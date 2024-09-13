@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import logging
 import pathlib
-import typing
 from typing import TYPE_CHECKING
 
 import pandas as pd
@@ -33,11 +32,12 @@ def open_image_and_tracks(
     images_dataset: pathlib.Path,
     tracks_dataset: pathlib.Path,
     features_dataset: pathlib.Path,
-    fov_name: str,
+    fov_name: str = "/B/4/8",
     features_type: str = "features",
     expand_z_for_tracking_labels: bool = True,
     load_tracks_layer: bool = True,
-) -> typing.List[napari.types.LayerDataTuple]:
+    tracks_z_index: int = -1,
+) -> list[napari.types.LayerDataTuple]:
     """
     Load images and tracking labels.
     Also load features from a directory and associate them with the tracking labels.
@@ -55,9 +55,13 @@ def open_image_and_tracks(
     fov_name : str
         Name of the FOV to load, e.g. `"A/12/2"`.
     features_type : str
-        Name of the subdirectory containing the feature files.
+        Name of the feature array, by default `"features"`.
     expand_z_for_tracking_labels : bool
         Whether to expand the tracking labels to the Z dimension of the images.
+    load_tracks_layer : bool
+        Whether to load the tracks layer.
+    tracks_z_index : int
+        Index of the Z slice to place the 2D tracks, by default -1 (middle slice).
 
     Returns
     -------
@@ -98,6 +102,10 @@ def open_image_and_tracks(
     if load_tracks_layer:
         _logger.info(f"Loading tracks from {str(tracks_csv)} with ultrack")
         tracks_layer = read_csv(tracks_csv)
+        if tracks_z_index is not None:
+            tracks_z_index = image_z // 2
+        _logger.info(f"Placing tracks at Z={tracks_z_index}")
+        tracks_layer[0].insert(loc=2, column="z", value=tracks_z_index)
         image_layers.append(tracks_layer)
     _logger.info(f"Finished loading {len(image_layers)} layers")
     _logger.debug(f"Layers: {image_layers}")
