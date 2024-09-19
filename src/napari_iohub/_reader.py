@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 import dask.array as da
 import numpy as np
-from iohub.ngff import (
+from iohub.ngff.nodes import (
     MultiScaleMeta,
     NGFFNode,
     OMEROMeta,
