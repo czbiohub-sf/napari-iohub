@@ -16,7 +16,7 @@ from iohub.ngff.nodes import (
     _open_store,
     open_ome_zarr,
 )
-from pydantic.color import Color
+from pydantic_extra_types.color import Color
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath
