@@ -3,7 +3,7 @@ import os
 from typing import Callable
 
 import napari
-from iohub.ngff import Plate, Row, Well, open_ome_zarr
+from iohub.ngff.nodes import Plate, Row, Well, open_ome_zarr
 from napari.qt.threading import create_worker
 from napari.utils.notifications import show_info
 from qtpy.QtCore import Qt

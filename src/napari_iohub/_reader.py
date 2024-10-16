@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Literal
 
 import dask.array as da
 import numpy as np
-from iohub.ngff import (
+from iohub.ngff.nodes import (
     MultiScaleMeta,
     NGFFNode,
     OMEROMeta,
@@ -16,7 +16,7 @@ from iohub.ngff import (
     _open_store,
     open_ome_zarr,
 )
-from pydantic.color import Color
+from pydantic_extra_types.color import Color
 
 if TYPE_CHECKING:
     from _typeshed import StrOrBytesPath

@@ -1,6 +1,6 @@
 import numpy as np
 import pytest
-from iohub.ngff import open_ome_zarr
+from iohub import open_ome_zarr
 
 
 @pytest.fixture(scope="session")

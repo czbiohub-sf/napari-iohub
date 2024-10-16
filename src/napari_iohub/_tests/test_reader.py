@@ -1,6 +1,6 @@
 import os
 
-from iohub.ngff import open_ome_zarr
+from iohub import open_ome_zarr
 from numpy.testing import assert_equal
 
 from napari_iohub import napari_get_reader
