@@ -32,7 +32,6 @@ def open_image_and_tracks(
     tracks_dataset: pathlib.Path,
     features_dataset: pathlib.Path,
     fov_name: str,
-    features_type: str = "features",
     expand_z_for_tracking_labels: bool = True,
     load_tracks_layer: bool = True,
     tracks_z_index: int = -1,
@@ -53,8 +52,6 @@ def open_image_and_tracks(
         Path to the predicted embeddings.
     fov_name : str
         Name of the FOV to load, e.g. `"A/12/2"`.
-    features_type : str
-        Name of the feature array, by default `"features"`.
     expand_z_for_tracking_labels : bool
         Whether to expand the tracking labels to the Z dimension of the images.
     load_tracks_layer : bool
@@ -72,27 +69,23 @@ def open_image_and_tracks(
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
     image_layers = fov_to_layers(image_fov)
-    _logger.info(f"Loading {features_type} from {str(features_dataset)}")
+    _logger.info(f"Loading features from {str(features_dataset)}")
     features = (
         open_zarr(features_dataset)
-        .set_index(sample=["fov_name", "track_id", "t"])[features_type]
-        .sel(fov_name=fov_name)
+        .set_index(sample=["fov_name", "track_id", "t", "UMAP1", "UMAP2"])["sample"]
+        .to_dataframe()
+        .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
+        .rename(columns={"track_id": "label", "t": "frame"})
     )
     _logger.info(f"Loading tracking labels from {tracks_dataset}")
     tracks_plate = open_ome_zarr(tracks_dataset)
     tracks_fov = tracks_plate[fov_name]
     labels_layer = fov_to_layers(tracks_fov, layer_type="labels")[0]
+    image_z = image_fov["0"].slices
     if expand_z_for_tracking_labels:
-        image_z = image_fov["0"].slices
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-    feature_indices = (
-        features["sample"]
-        .to_dataframe()
-        .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
-        .rename(columns={"track_id": "label", "t": "frame"})
-    )
-    labels_layer[1]["features"] = feature_indices
+    labels_layer[1]["features"] = features
     image_layers.append(labels_layer)
     tracks_csv = next((tracks_dataset / fov_name.strip("/")).glob("*.csv"))
     if load_tracks_layer:
