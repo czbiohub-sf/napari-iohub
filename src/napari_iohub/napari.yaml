@@ -13,7 +13,7 @@ contributions:
       title: Edit labels layer for an FOV
     - id: napari-iohub.view_tracks
       python_name: napari_iohub._view_tracks:open_image_and_tracks
-      title: View tracks
+      title: Single-cell features
   readers:
     - command: napari-iohub.get_reader
       accepts_directories: true
@@ -24,4 +24,4 @@ contributions:
     - command: napari-iohub.edit_labels
       display_name: Edit labels
     - command: napari-iohub.view_tracks
-      display_name: View tracks
+      display_name: Single-cell features

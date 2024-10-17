@@ -4,7 +4,6 @@ import logging
 import pathlib
 from typing import TYPE_CHECKING
 
-import pandas as pd
 from iohub.ngff import open_ome_zarr
 from magicgui import magic_factory
 from ultrack.reader.napari_reader import read_csv
@@ -32,7 +31,7 @@ def open_image_and_tracks(
     images_dataset: pathlib.Path,
     tracks_dataset: pathlib.Path,
     features_dataset: pathlib.Path,
-    fov_name: str = "/B/4/8",
+    fov_name: str,
     features_type: str = "features",
     expand_z_for_tracking_labels: bool = True,
     load_tracks_layer: bool = True,
@@ -87,16 +86,13 @@ def open_image_and_tracks(
         image_z = image_fov["0"].slices
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-    features_index = (
+    feature_indices = (
         features["sample"]
         .to_dataframe()
-        .reset_index(drop=True)[["track_id", "t"]]
+        .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
         .rename(columns={"track_id": "label", "t": "frame"})
     )
-    features_values = pd.DataFrame(
-        data=features.values, columns=[f"feature_{i}" for i in range(features.shape[1])]
-    ).reset_index(drop=True)
-    labels_layer[1]["features"] = pd.concat([features_index, features_values], axis=1)
+    labels_layer[1]["features"] = feature_indices
     image_layers.append(labels_layer)
     tracks_csv = next((tracks_dataset / fov_name.strip("/")).glob("*.csv"))
     if load_tracks_layer:
