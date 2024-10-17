@@ -13,12 +13,24 @@ from napari_iohub._reader import fov_to_layers
 
 if TYPE_CHECKING:
     import napari
+    import pandas
 
 _logger = logging.getLogger(__name__)
 
 
 def _zarr_modes(label: str) -> dict[str, str]:
     return {"mode": "d", "label": label}
+
+
+def _load_features(features_path: pathlib.Path) -> pandas.DataFrame:
+    """Load UMAP coordinates from Zarr store."""
+    return (
+        open_zarr(features_path)
+        .set_index(sample=["fov_name", "track_id", "t", "UMAP1", "UMAP2"])["sample"]
+        .to_dataframe()
+        .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
+        .rename(columns={"track_id": "label", "t": "frame"})
+    )
 
 
 @magic_factory(
@@ -30,7 +42,7 @@ def _zarr_modes(label: str) -> dict[str, str]:
 def open_image_and_tracks(
     images_dataset: pathlib.Path,
     tracks_dataset: pathlib.Path,
-    features_dataset: pathlib.Path,
+    features_dataset: pathlib.Path | None,
     fov_name: str,
     expand_z_for_tracking_labels: bool = True,
     load_tracks_layer: bool = True,
@@ -38,7 +50,8 @@ def open_image_and_tracks(
 ) -> list[napari.types.LayerDataTuple]:
     """
     Load images and tracking labels.
-    Also load features from a directory and associate them with the tracking labels.
+    Also load predicted features (if supplied)
+    and associate them with the tracking labels.
     To be used with napari-clusters-plotter plugin.
 
     Parameters
@@ -48,8 +61,8 @@ def open_image_and_tracks(
     tracks_dataset : pathlib.Path
         Path to the tracking labels dataset (HCS OME-Zarr).
         Potentially with a singleton Z dimension.
-    features_dataset : pathlib.Path
-        Path to the predicted embeddings.
+    features_dataset : pathlib.Path | None
+        Path to the predicted embeddings, optional.
     fov_name : str
         Name of the FOV to load, e.g. `"A/12/2"`.
     expand_z_for_tracking_labels : bool
@@ -69,14 +82,6 @@ def open_image_and_tracks(
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
     image_layers = fov_to_layers(image_fov)
-    _logger.info(f"Loading features from {str(features_dataset)}")
-    features = (
-        open_zarr(features_dataset)
-        .set_index(sample=["fov_name", "track_id", "t", "UMAP1", "UMAP2"])["sample"]
-        .to_dataframe()
-        .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
-        .rename(columns={"track_id": "label", "t": "frame"})
-    )
     _logger.info(f"Loading tracking labels from {tracks_dataset}")
     tracks_plate = open_ome_zarr(tracks_dataset)
     tracks_fov = tracks_plate[fov_name]
@@ -85,7 +90,9 @@ def open_image_and_tracks(
     if expand_z_for_tracking_labels:
         _logger.info(f"Expanding tracks to Z={image_z}")
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-    labels_layer[1]["features"] = features
+    if features_dataset is not None:
+        _logger.info(f"Loading features from {str(features_dataset)}")
+        labels_layer[1]["features"] = _load_features(features_dataset)
     image_layers.append(labels_layer)
     tracks_csv = next((tracks_dataset / fov_name.strip("/")).glob("*.csv"))
     if load_tracks_layer:
