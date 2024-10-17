@@ -22,11 +22,12 @@ def _zarr_modes(label: str) -> dict[str, str]:
     return {"mode": "d", "label": label}
 
 
-def _load_features(features_path: pathlib.Path) -> pandas.DataFrame:
+def _load_features(features_path: pathlib.Path, fov_name: str) -> pandas.DataFrame:
     """Load UMAP coordinates from Zarr store."""
     return (
         open_zarr(features_path)
-        .set_index(sample=["fov_name", "track_id", "t", "UMAP1", "UMAP2"])["sample"]
+        .set_index(sample=["fov_name", "track_id", "t", "UMAP1", "UMAP2"])
+        .sel(fov_name=fov_name)["sample"]
         .to_dataframe()
         .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
         .rename(columns={"track_id": "label", "t": "frame"})
@@ -92,7 +93,7 @@ def open_image_and_tracks(
         labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
     if features_dataset is not None:
         _logger.info(f"Loading features from {str(features_dataset)}")
-        labels_layer[1]["features"] = _load_features(features_dataset)
+        labels_layer[1]["features"] = _load_features(features_dataset, fov_name)
     image_layers.append(labels_layer)
     tracks_csv = next((tracks_dataset / fov_name.strip("/")).glob("*.csv"))
     if load_tracks_layer:
