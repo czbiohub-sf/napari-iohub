@@ -10,9 +10,9 @@ from iohub.ngff.nodes import (
     MultiScaleMeta,
     NGFFNode,
     OMEROMeta,
+    Plate,
     Position,
     Well,
-    Plate,
     _open_store,
     open_ome_zarr,
 )
@@ -69,9 +69,7 @@ def _get_node(path: StrOrBytesPath):
         zgroup.store.close()
         node = open_ome_zarr(store_path=path, layout="hcs", mode="r")
     else:
-        raise KeyError(
-            f"NGFF plate or well metadata not found under '{zgroup.name}'"
-        )
+        raise KeyError(f"NGFF plate or well metadata not found under '{zgroup.name}'")
     return node
 
 
@@ -80,8 +78,8 @@ def stitch_well_by_channel(well: Well, row_wrap: int):
     levels = []
     pyramids: list[list] = []
     for i, (_, pos) in enumerate(well.positions()):
-        l, ims = _get_multiscales(pos)
-        levels.append(l)
+        lv, ims = _get_multiscales(pos)
+        levels.append(lv)
         pyramids.append(ims)
         if i == 0:
             layers_kwargs = _ome_to_napari_by_channel(pos.metadata)
@@ -98,8 +96,8 @@ def stack_well_by_position(well: Well):
     levels = []
     pyramids: list[list] = []
     for i, (_, pos) in enumerate(well.positions()):
-        l, ims = _get_multiscales(pos)
-        levels.append(l)
+        lv, ims = _get_multiscales(pos)
+        levels.append(lv)
         pyramids.append(ims)
         if i == 0:
             layers_kwargs = _ome_to_napari_by_channel(pos.metadata)
@@ -118,9 +116,7 @@ def _get_multiscales(pos: Position):
         try:
             multiscales.append(da.from_zarr(pos[im]))
         except Exception as e:
-            logging.warning(
-                f"Skipped array '{im}' at position {pos.zgroup.name}: {e}"
-            )
+            logging.warning(f"Skipped array '{im}' at position {pos.zgroup.name}: {e}")
     return len(multiscales), multiscales
 
 
@@ -136,12 +132,12 @@ def _make_grid(elements: list[da.Array], cols: int):
     return grid
 
 
-def _ome_to_napari_by_channel(metadata):
+def _ome_to_napari_by_channel(metadata, parse_colormap: bool = True):
     omero: OMEROMeta = metadata.omero
     layers_kwargs = []
     for channel in omero.channels:
         metadata = {"name": channel.label}
-        if channel.color:
+        if channel.color and parse_colormap:
             # alpha channel is optional
             rgb = Color(channel.color).as_rgb_tuple(alpha=None)
             start = [0.0] * 3
@@ -153,6 +149,7 @@ def _ome_to_napari_by_channel(metadata):
                     [v / np.iinfo(np.uint8).max for v in rgb],
                 ]
             )
+            metadata["blending"] = "additive"
         layers_kwargs.append(metadata)
     return layers_kwargs
 
@@ -190,20 +187,20 @@ def layers_from_arrays(
     return layers
 
 
-def fov_to_layers(fov: Position):
-    layers_kwargs = _ome_to_napari_by_channel(fov.metadata)
+def fov_to_layers(fov: Position, layer_type: str = "image"):
+    layers_kwargs = _ome_to_napari_by_channel(
+        fov.metadata, parse_colormap=(layer_type == "image")
+    )
     ch_axis = _find_ch_axis(fov)
     arrays = [arr for _, arr in fov.images()]
-    return layers_from_arrays(layers_kwargs, ch_axis, arrays, mode="stitch")
+    return layers_from_arrays(
+        layers_kwargs, ch_axis, arrays, mode="stitch", layer_type=layer_type
+    )
 
 
-def well_to_layers(
-    well: Well, mode: Literal["stitch", "stack"], layer_type: str
-):
+def well_to_layers(well: Well, mode: Literal["stitch", "stack"], layer_type: str):
     if mode == "stitch":
-        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(
-            well, row_wrap=4
-        )
+        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(well, row_wrap=4)
     elif mode == "stack":
         layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
     return layers_from_arrays(
@@ -234,9 +231,7 @@ def make_bbox(bbox_extents):
     maxr = bbox_extents[2]
     maxc = bbox_extents[3]
 
-    bbox_rect = np.array(
-        [[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]]
-    )
+    bbox_rect = np.array([[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]])
     bbox_rect = np.moveaxis(bbox_rect, 2, 0)
 
     return bbox_rect
@@ -276,9 +271,7 @@ def plate_to_layers(
                 ]
                 for k in range(len(boxes)):
                     boxes[k].append(box_extents[k] - 0.5)
-                properties["fov"].append(
-                    well_path + "/" + next(well.positions())[0]
-                )
+                properties["fov"].append(well_path + "/" + next(well.positions())[0])
             else:
                 row_arrays.append(None)
         plate_arrays.append(row_arrays)
@@ -291,9 +284,7 @@ def plate_to_layers(
             row_level = []
             for c in r:
                 if c is None:
-                    arr = da.zeros(
-                        shape=fill_args[level][0], dtype=fill_args[level][1]
-                    )
+                    arr = da.zeros(shape=fill_args[level][0], dtype=fill_args[level][1])
                 else:
                     arr = c[level]
                 row_level.append(arr)

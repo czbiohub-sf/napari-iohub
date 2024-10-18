@@ -3,13 +3,12 @@ from __future__ import annotations
 import logging
 import os
 import warnings
-from os.path import isdir, isfile
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from napari import Viewer
 import numpy as np
 from iohub.ngff.nodes import Plate, Position, Row, Well, open_ome_zarr
+from napari import Viewer
 from qtpy.QtWidgets import (
     QFileDialog,
     QFormLayout,
@@ -27,7 +26,6 @@ if TYPE_CHECKING:
     import napari
     from napari.types import LayerData
 _logger = logging.getLogger(__name__)
-_logger.setLevel(logging.DEBUG)
 
 
 class _LoadFOV(QWidget):
