@@ -87,6 +87,8 @@ def open_image_and_tracks(
     tracks_plate = open_ome_zarr(tracks_dataset)
     tracks_fov = tracks_plate[fov_name]
     labels_layer = fov_to_layers(tracks_fov, layer_type="labels")[0]
+    # TODO: remove this after https://github.com/napari/napari/issues/7327 is fixed
+    labels_layer[0][0] = labels_layer[0][0].astype("uint32")
     image_z = image_fov["0"].slices
     if expand_z_for_tracking_labels:
         _logger.info(f"Expanding tracks to Z={image_z}")
