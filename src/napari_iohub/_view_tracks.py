@@ -23,13 +23,18 @@ def _zarr_modes(label: str) -> dict[str, str]:
 
 
 def _load_features(features_path: pathlib.Path, fov_name: str) -> pandas.DataFrame:
-    """Load UMAP coordinates from Zarr store."""
+    """Load UMAP and PHATE coordinates from Zarr store if they exist."""
+    ds = open_zarr(features_path)
+    coords = ["fov_name", "track_id", "t"]
+    reductions = ["UMAP1", "UMAP2", "PHATE1", "PHATE2"]
+    for dim in reductions:
+        if dim in ds:
+            coords.append(dim)
+    ds = ds.set_index(sample=coords)
     return (
-        open_zarr(features_path)
-        .set_index(sample=["fov_name", "track_id", "t", "UMAP1", "UMAP2"])
-        .sel(fov_name=fov_name)["sample"]
+        ds.sel(fov_name=fov_name)["sample"]
         .to_dataframe()
-        .reset_index(drop=True)[["track_id", "t", "UMAP1", "UMAP2"]]
+        .reset_index(drop=True)[coords[1:]]
         .rename(columns={"track_id": "label", "t": "frame"})
     )
 
