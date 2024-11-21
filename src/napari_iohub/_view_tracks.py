@@ -23,7 +23,7 @@ def _zarr_modes(label: str) -> dict[str, str]:
 
 
 def _load_features(features_path: pathlib.Path, fov_name: str) -> pandas.DataFrame:
-    """Load UMAP and PHATE coordinates from Zarr store if PHATE exists."""
+    """Load UMAP and PHATE coordinates from Zarr store if they exist."""
     ds = open_zarr(features_path)
     coords = ["fov_name", "track_id", "t"]
     reductions = ["UMAP1", "UMAP2", "PHATE1", "PHATE2"]
