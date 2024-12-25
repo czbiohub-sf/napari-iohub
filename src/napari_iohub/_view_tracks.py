@@ -6,7 +6,6 @@ from typing import TYPE_CHECKING
 
 from iohub.ngff import open_ome_zarr
 from magicgui import magic_factory
-from ultrack.reader.napari_reader import read_csv
 from xarray import open_zarr
 
 from napari_iohub._reader import fov_to_layers
@@ -84,6 +83,11 @@ def open_image_and_tracks(
         List of layers to add to the viewer.
         (image layers and one labels layer)
     """
+    try:
+        from ultrack.reader.napari_reader import read_csv
+    except ImportError:
+        raise ImportError("Please install napari-iohub[clustering]")
+
     _logger.info(f"Loading images from {images_dataset}")
     image_plate = open_ome_zarr(images_dataset)
     image_fov = image_plate[fov_name]
