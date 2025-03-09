@@ -163,16 +163,29 @@ def main():
     )
     labels_layer.features = features_df
     
+    # Verify features are properly assigned
+    if hasattr(labels_layer, 'features') and labels_layer.features is not None:
+        print(f"Labels layer has {len(labels_layer.features)} features: {', '.join(labels_layer.features.columns)}")
+    else:
+        print("Warning: Labels layer does not have features assigned!")
+    
     # Add the points layer with features
     points_layer = viewer.add_points(
         nuclei_points, 
         name='nuclei_points', 
         size=10,
         face_color='yellow',
+        border_color='white',
         blending='additive', 
         opacity=0.7
     )
     points_layer.features = point_features
+    
+    # Verify features are properly assigned
+    if hasattr(points_layer, 'features') and points_layer.features is not None:
+        print(f"Points layer has {len(points_layer.features)} features: {', '.join(points_layer.features.columns)}")
+    else:
+        print("Warning: Points layer does not have features assigned!")
     
     # Add bounding boxes for better visualization
     for layer in viewer.layers:
@@ -212,12 +225,22 @@ def main():
     print("- Scatter plots support millions of points with interactive performance")
     print("- Histograms provide efficient visualization of data distributions")
     print("- Clustering columns are automatically detected and used for coloring points")
+    print("- Points are highlighted based on the current slice position")
+    print("- Try scrolling through the Z dimension to see points change opacity and size")
     
     print("\nInteractive Selection Features:")
     print("- Hold Shift + drag to draw a lasso around points to select them")
     print("- Selected points are highlighted in both the plot and the napari viewer")
     print("- Press Escape to cancel a selection")
     print("- Regular mouse drag (without Shift) pans the plot")
+    
+    print("\nClassification Features:")
+    print("- Each lasso selection automatically creates a new class with a unique color")
+    print("- Points are colored according to their class in both the plot and napari")
+    print("- All classified points are shown in a single layer in napari")
+    print("- Classes are fully visible in both 2D and 3D views")
+    print("- Classes cycle through a predefined set of colors")
+    print("- Make an empty selection (no points) to clear all classes")
     
     # Keep the viewer open
     napari.run()
