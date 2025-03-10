@@ -232,7 +232,9 @@ def main():
     print("- Hold Shift + drag to draw a lasso around points to select them")
     print("- Selected points are highlighted in both the plot and the napari viewer")
     print("- Click directly on points in the napari viewer to highlight them in the plot")
-    print("- The highlighted point will appear larger and yellow in the plot")
+    print("- Click directly on points in the Vispy plotter to highlight them in the napari viewer")
+    print("- Points selected in napari appear yellow in the plot")
+    print("- Points selected in the plot appear bright green in napari (for 2 seconds)")
     print("- Press Escape to cancel a selection")
     print("- Regular mouse drag (without Shift) pans the plot")
     

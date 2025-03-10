@@ -43,6 +43,9 @@ class VispyCanvas(QWidget):
     # Signal emitted when points are selected
     selection_changed = Signal(object)
     
+    # Signal emitted when a point is clicked
+    point_clicked = Signal(int)
+    
     def __init__(self, parent=None):
         super().__init__(parent)
         
@@ -110,6 +113,9 @@ class VispyCanvas(QWidget):
         self.selection_line = None
         self.selected_mask = None
         
+        # Store the last clicked point
+        self.clicked_point_idx = None
+        
         # Connect events
         self.canvas.events.mouse_press.connect(self._on_mouse_press)
         self.canvas.events.mouse_move.connect(self._on_mouse_move)
@@ -159,7 +165,50 @@ class VispyCanvas(QWidget):
         
     def _on_mouse_press(self, event):
         """Handle mouse press events"""
-        if event.button == 1 and 'Shift' in event.modifiers:  # Left click with Shift key
+        # If shift is not pressed, check for point clicking
+        if not event.modifiers:
+            if hasattr(self, 'scatter') and self.scatter is not None:
+                # Get the mouse position in canvas coordinates
+                pos = event.pos
+                
+                # Convert to data coordinates
+                tr = self.view.scene.transform
+                pos = tr.imap(pos)
+                
+                # Get the data coordinates
+                x, y = pos[0], pos[1]
+                
+                # Find the closest point
+                if hasattr(self, 'x_data') and hasattr(self, 'y_data'):
+                    distances = np.sqrt((self.x_data - x)**2 + (self.y_data - y)**2)
+                    closest_idx = np.argmin(distances)
+                    min_distance = distances[closest_idx]
+                    
+                    # Only select if the point is close enough (within 5% of the data range)
+                    x_range = np.max(self.x_data) - np.min(self.x_data)
+                    y_range = np.max(self.y_data) - np.min(self.y_data)
+                    threshold = 0.05 * np.sqrt(x_range**2 + y_range**2)
+                    
+                    if min_distance < threshold:
+                        print(f"Clicked on point {closest_idx} in plot")
+                        print(f"Plot coordinates: ({self.x_data[closest_idx]}, {self.y_data[closest_idx]})")
+                        
+                        # Store the clicked point
+                        self.clicked_point_idx = closest_idx
+                        
+                        # Highlight the clicked point
+                        mask = np.zeros(len(self.x_data), dtype=bool)
+                        mask[closest_idx] = True
+                        self._highlight_selected_points(mask)
+                        
+                        # Emit the point clicked signal
+                        self.point_clicked.emit(closest_idx)
+                        
+                        # Don't start lasso selection
+                        return
+        
+        # If shift is pressed or no point was clicked, proceed with lasso selection
+        if event.button == 1 and 'Shift' in event.modifiers:
             # Start lasso selection
             self.is_selecting = True
             self.selection_path = []
@@ -227,24 +276,24 @@ class VispyCanvas(QWidget):
             
             # Prevent event from propagating to other handlers
             event.handled = True
-            
+        
     def _on_key_press(self, event):
         """Handle key press events"""
-        if event.key == 'Escape':
+        if event.key == 'Escape' and self.is_selecting:
             # Cancel selection
+            self.is_selecting = False
+            self.selection_path = []
+            
+            # Remove selection line
             if self.selection_line is not None:
                 self.selection_line.parent = None
                 self.selection_line = None
             
-            # Reset selection
-            self.is_selecting = False
-            self.selection_path = []
-            
-            # Clear selection highlight
+            # Clear any highlighted points
             if self.selected_mask is not None:
                 self._highlight_selected_points(np.zeros_like(self.selected_mask, dtype=bool))
                 self.selection_changed.emit(np.array([]))
-                
+            
             # Prevent event from propagating to other handlers
             event.handled = True
         
@@ -561,6 +610,7 @@ class VispyPlotterWidget(QWidget):
         
         # Connect selection signal
         self.canvas.selection_changed.connect(self.on_selection_changed)
+        self.canvas.point_clicked.connect(self.on_point_clicked)
         
         # Create graph container
         graph_container = QWidget()
@@ -1604,7 +1654,7 @@ class VispyPlotterWidget(QWidget):
                                 # Find which index in data_indices matches the selected index
                                 idx = np.where(self.data_indices == value)[0]
                                 if len(idx) > 0:
-                                    mask[idx[0]] = True
+                                    mask[idx] = True
                                     print(f"Mapped to plot index {idx[0]} using data_indices")
                                     if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
                                         print(f"Plot coordinates: ({self.data_x[idx[0]]}, {self.data_y[idx[0]]})")
@@ -1674,4 +1724,121 @@ class VispyPlotterWidget(QWidget):
                     self._highlight_napari_selection(mask)
                     
                     # Update selection info
-                    self.selection_info.setText(f"Label {value} selected from napari viewer") 
+                    self.selection_info.setText(f"Label {value} selected from napari viewer")
+
+    def on_point_clicked(self, point_idx):
+        """Handle point click events from the Vispy canvas"""
+        if self.analysed_layer is None:
+            return
+        
+        print(f"Point {point_idx} clicked in Vispy plotter")
+        
+        # Get the corresponding index in the napari layer
+        napari_idx = None
+        
+        # Try to map using the data_indices if available
+        if hasattr(self, 'data_indices') and self.data_indices is not None:
+            if point_idx < len(self.data_indices):
+                napari_idx = self.data_indices[point_idx]
+                print(f"Mapped to napari index {napari_idx} using data_indices")
+        
+        # If we have a valid index, highlight the point in napari
+        if napari_idx is not None:
+            # For Points layer
+            if isinstance(self.analysed_layer, Points):
+                # Store original colors
+                if not hasattr(self, 'original_point_colors'):
+                    self.original_point_colors = self.analysed_layer.face_color.copy()
+                
+                # Clear current selection
+                self.analysed_layer.selected = False
+                
+                # Select the point
+                if napari_idx < len(self.analysed_layer.data):
+                    # Create a temporary bright color for the selected point
+                    face_colors = self.original_point_colors.copy()
+                    
+                    # Check if we have a single color or per-point colors
+                    if face_colors.ndim == 1:  # Single color for all points
+                        # Convert to per-point colors
+                        face_colors = np.tile(face_colors, (len(self.analysed_layer.data), 1))
+                    
+                    # Set the selected point to bright green
+                    face_colors[napari_idx] = [0, 1, 0, 1]  # Bright green with full opacity
+                    
+                    # Update the layer colors
+                    self.analysed_layer.face_color = face_colors
+                    
+                    # Also select the point to show its border
+                    self.analysed_layer.selected_data = {napari_idx}
+                    
+                    print(f"Selected point {napari_idx} in napari layer {self.analysed_layer.name}")
+                    
+                    # Get the coordinates of the selected point
+                    point_coords = self.analysed_layer.data[napari_idx]
+                    print(f"Napari coordinates: {point_coords}")
+                    
+                    # Update selection info
+                    self.selection_info.setText(f"Point {napari_idx} selected from Vispy plotter")
+                    
+                    # Set a timer to reset the color after 2 seconds
+                    if hasattr(self, 'color_reset_timer'):
+                        self.color_reset_timer.stop()
+                    else:
+                        self.color_reset_timer = QTimer()
+                        self.color_reset_timer.setSingleShot(True)
+                        self.color_reset_timer.timeout.connect(self._reset_point_colors)
+                    
+                    self.color_reset_timer.start(2000)  # 2 seconds
+            
+            # For Labels layer
+            elif isinstance(self.analysed_layer, Labels):
+                # For Labels, we need to find the label with the matching value
+                if hasattr(self, 'features_df') and 'label' in self.features_df.columns:
+                    label_value = napari_idx
+                    print(f"Highlighting label {label_value} in napari")
+                    
+                    # Create a temporary layer to highlight the selected label
+                    highlight_data = np.zeros_like(self.analysed_layer.data)
+                    highlight_data[self.analysed_layer.data == label_value] = 1
+                    
+                    # Check if highlight layer already exists
+                    highlight_layer_name = f"{self.analysed_layer.name}_highlight"
+                    if highlight_layer_name in self.viewer.layers:
+                        # Update existing layer
+                        self.viewer.layers[highlight_layer_name].data = highlight_data
+                    else:
+                        # Create new layer
+                        self.viewer.add_labels(
+                            highlight_data,
+                            name=highlight_layer_name,
+                            color={1: 'lime'},  # Bright green
+                            opacity=0.7
+                        )
+                    
+                    # Update selection info
+                    self.selection_info.setText(f"Label {label_value} selected from Vispy plotter")
+                    
+                    # Set a timer to remove the highlight layer after 2 seconds
+                    if hasattr(self, 'highlight_reset_timer'):
+                        self.highlight_reset_timer.stop()
+                    else:
+                        self.highlight_reset_timer = QTimer()
+                        self.highlight_reset_timer.setSingleShot(True)
+                        self.highlight_reset_timer.timeout.connect(
+                            lambda: self._remove_highlight_layer(highlight_layer_name)
+                        )
+                    
+                    self.highlight_reset_timer.start(2000)  # 2 seconds
+
+    def _reset_point_colors(self):
+        """Reset point colors to their original values"""
+        if hasattr(self, 'analysed_layer') and isinstance(self.analysed_layer, Points) and hasattr(self, 'original_point_colors'):
+            self.analysed_layer.face_color = self.original_point_colors
+            print("Reset point colors to original values")
+
+    def _remove_highlight_layer(self, layer_name):
+        """Remove the highlight layer"""
+        if hasattr(self, 'viewer') and layer_name in self.viewer.layers:
+            self.viewer.layers.remove(layer_name)
+            print(f"Removed highlight layer: {layer_name}")
