@@ -231,6 +231,8 @@ def main():
     print("\nInteractive Selection Features:")
     print("- Hold Shift + drag to draw a lasso around points to select them")
     print("- Selected points are highlighted in both the plot and the napari viewer")
+    print("- Click directly on points in the napari viewer to highlight them in the plot")
+    print("- The highlighted point will appear larger and yellow in the plot")
     print("- Press Escape to cancel a selection")
     print("- Regular mouse drag (without Shift) pans the plot")
     

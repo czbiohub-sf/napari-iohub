@@ -16,7 +16,7 @@ from vispy.color import get_colormap
 from napari.layers import Image, Labels, Layer, Points, Surface
 from napari.utils.colormaps import ALL_COLORMAPS, color_dict_to_colormap, label_colormap
 
-from qtpy.QtCore import Qt, Signal
+from qtpy.QtCore import Qt, Signal, QTimer
 from qtpy.QtGui import QColor
 from qtpy.QtWidgets import (
     QCheckBox,
@@ -299,7 +299,8 @@ class VispyCanvas(QWidget):
             )
         
     def make_scatter_plot(self, x_data, y_data, colors, sizes, alpha=0.7):
-        """Create a scatter plot"""
+        """Create a scatter plot with the given data"""
+        # Clear any existing plot
         self.reset()
         
         # Store data for selection
@@ -307,9 +308,6 @@ class VispyCanvas(QWidget):
         self.y_data = y_data
         self.colors = colors
         self.sizes = sizes
-        
-        # Create scatter visual - swap x and y to correct orientation
-        pos = np.column_stack([x_data, y_data])
         
         # Set alpha for all colors
         face_color = colors.copy()
@@ -319,16 +317,69 @@ class VispyCanvas(QWidget):
         # Create scatter plot
         self.scatter = visuals.Markers()
         self.scatter.set_data(
-            pos=pos, 
-            face_color=face_color, 
+            pos=np.column_stack([x_data, y_data]),
+            face_color=face_color,
             size=sizes,
             edge_width=0
         )
+        
+        # Add scatter plot to the scene
         self.view.add(self.scatter)
         
-        # Auto-scale the view
-        self.view.camera.set_range()
+        # Calculate axis limits with some padding
+        x_min, x_max = np.min(x_data), np.max(x_data)
+        y_min, y_max = np.min(y_data), np.max(y_data)
+        x_range = x_max - x_min
+        y_range = y_max - y_min
+        x_padding = x_range * 0.05
+        y_padding = y_range * 0.05
         
+        # Set axis limits
+        self.view.camera.set_range(
+            x=(x_min - x_padding, x_max + x_padding),
+            y=(y_min - y_padding, y_max + y_padding),
+            margin=0
+        )
+        
+        # Add axis with ticks and labels
+        self._add_axis_with_ticks(x_min, x_max, y_min, y_max)
+        
+        # Reset zoom to fit all data
+        self.view.camera.set_range()
+
+    def _add_axis_with_ticks(self, x_min, x_max, y_min, y_max):
+        """Add axis with ticks and labels to the plot"""
+        # Create axis visuals
+        x_axis = visuals.Line(pos=np.array([[x_min, y_min], [x_max, y_min]]), color='white', width=2)
+        y_axis = visuals.Line(pos=np.array([[x_min, y_min], [x_min, y_max]]), color='white', width=2)
+        
+        # Add axes to the scene
+        self.view.add(x_axis)
+        self.view.add(y_axis)
+        
+        # Create tick marks and labels
+        # X-axis ticks
+        x_ticks = np.linspace(x_min, x_max, 5)
+        for x in x_ticks:
+            # Tick mark
+            tick = visuals.Line(pos=np.array([[x, y_min], [x, y_min - (y_max - y_min) * 0.02]]), color='white', width=1)
+            self.view.add(tick)
+            
+            # Tick label
+            label = visuals.Text(text=f"{x:.2f}", pos=[x, y_min - (y_max - y_min) * 0.05], color='white', font_size=8)
+            self.view.add(label)
+        
+        # Y-axis ticks
+        y_ticks = np.linspace(y_min, y_max, 5)
+        for y in y_ticks:
+            # Tick mark
+            tick = visuals.Line(pos=np.array([[x_min, y], [x_min - (x_max - x_min) * 0.02, y]]), color='white', width=1)
+            self.view.add(tick)
+            
+            # Tick label
+            label = visuals.Text(text=f"{y:.2f}", pos=[x_min - (x_max - x_min) * 0.1, y], color='white', font_size=8)
+            self.view.add(label)
+
     def make_2d_histogram(self, x_data, y_data, bin_number=100, log_scale=False):
         """Create a 2D histogram"""
         self.reset()
@@ -464,6 +515,20 @@ class VispyPlotterWidget(QWidget):
         self.old_frame = None
         self.frame = self.viewer.dims.current_step[0] if self.viewer.dims.ndim > 0 else 0
         
+        # Store the active layer and selection state
+        self.napari_active_layer = None
+        self.napari_selected_indices = []
+        self.last_selection_state = None
+        
+        # Create a timer to check for selection changes
+        self.selection_timer = QTimer()
+        self.selection_timer.setInterval(100)  # Check every 100ms
+        self.selection_timer.timeout.connect(self._check_napari_selection)
+        self.selection_timer.start()
+        
+        # Connect to mouse click events in napari
+        self.viewer.mouse_drag_callbacks.append(self._on_napari_mouse_click)
+        
         # Classification system
         self.class_colors = [
             [1.0, 0.0, 0.0, 1.0],  # Red
@@ -491,11 +556,11 @@ class VispyPlotterWidget(QWidget):
         self.layout.setContentsMargins(0, 0, 0, 0)  # Remove margins
         
         # Create canvas widget with Vispy
-        self.graphics_widget = VispyCanvas(parent=self)  # Pass self as parent
-        self.graphics_widget.setStyleSheet("background-color: rgba(0, 0, 0, 0);")
+        self.canvas = VispyCanvas(parent=self)  # Pass self as parent
+        self.canvas.setStyleSheet("background-color: rgba(0, 0, 0, 0);")
         
         # Connect selection signal
-        self.graphics_widget.selection_changed.connect(self.on_selection_changed)
+        self.canvas.selection_changed.connect(self.on_selection_changed)
         
         # Create graph container
         graph_container = QWidget()
@@ -503,7 +568,7 @@ class VispyPlotterWidget(QWidget):
         graph_container.setStyleSheet("background-color: rgba(0, 0, 0, 0);")
         graph_container.setLayout(QVBoxLayout())
         graph_container.layout().setContentsMargins(0, 0, 0, 0)  # Remove margins
-        graph_container.layout().addWidget(self.graphics_widget)
+        graph_container.layout().addWidget(self.canvas)
         
         # Add instruction label right below the plot
         instruction_label = QLabel("Hold Shift + drag to select points. Each selection creates a new class.\nEmpty selection clears all classes. Press Escape to cancel selection.")
@@ -655,46 +720,36 @@ class VispyPlotterWidget(QWidget):
         self.colormap_dropdown.currentIndexChanged.connect(self.update_colormap)
         self.viewer.dims.events.ndisplay.connect(self._on_ndisplay_change)
         
+        # Connect to napari selection events
+        self.viewer.layers.selection.events.active.connect(self._on_active_layer_change)
+        
     def on_selection_changed(self, selected_indices):
-        """Handle selection change events"""
+        """Handle selection changes from the Vispy canvas"""
         if len(selected_indices) > 0:
             # Update selection info
-            self.selection_info.setText(f"{len(selected_indices)} points selected (Esc to cancel, empty selection to clear all classes)")
+            self.selection_info.setText(f"Selected {len(selected_indices)} points. Each selection creates a new class.")
             
-            # Automatically assign a class to the selected points
+            # Assign a new class to the selected points
             if self.class_assignments is None:
-                self.class_assignments = np.zeros(len(self.data_x), dtype=int)
+                self.class_assignments = np.zeros(self.plot_data.shape[0], dtype=int)
             
-            # Increment class ID and cycle through colors
-            self.current_class = (self.current_class + 1) % len(self.class_colors)
-            class_id = self.current_class + 1  # Add 1 to avoid 0 (unassigned)
+            # Get the next class ID (max + 1)
+            next_class = 1
+            if np.any(self.class_assignments > 0):
+                next_class = np.max(self.class_assignments) + 1
             
-            # Assign selected points to the current class
-            self.class_assignments[selected_indices] = class_id
+            # Assign the new class
+            self.class_assignments[selected_indices] = next_class
             
-            # Print debug info
-            print(f"Selected {len(selected_indices)} points, assigned to class {class_id}")
-            print(f"Layer type: {type(self.analysed_layer).__name__}")
-            
-            # If this is a Labels layer, provide additional feedback
-            if isinstance(self.analysed_layer, Labels):
-                features = self.get_layer_tabular_data(self.analysed_layer)
-                if features is not None and 'label' in features.columns:
-                    # Get the label values for the selected points
-                    selected_labels = features.iloc[selected_indices]['label'].values
-                    print(f"Selected labels: {selected_labels[:10]}{'...' if len(selected_labels) > 10 else ''}")
-                    self.selection_info.setText(f"{len(selected_indices)} points selected ({len(np.unique(selected_labels))} unique labels)")
-            
-            # Update visualization in the plot
+            # Update visualization
             self._update_class_visualization()
             
             # Update class layer in napari
             self._update_class_layers()
-            
+        
         else:
             # Empty selection - clear all classes
             if self.class_assignments is not None and np.any(self.class_assignments > 0):
-                print("Empty selection detected - clearing all classes")
                 self.clear_classes()
                 self.selection_info.setText("All classes cleared. Hold Shift + drag to select points with lasso.")
             else:
@@ -842,7 +897,7 @@ class VispyPlotterWidget(QWidget):
     
     def _update_point_highlighting(self):
         """Update point highlighting based on current slice"""
-        if self.analysed_layer is None or not hasattr(self.graphics_widget, 'scatter') or self.graphics_widget.scatter is None:
+        if self.analysed_layer is None or not hasattr(self.canvas, 'scatter') or self.canvas.scatter is None:
             return
             
         # Get the current frame
@@ -887,7 +942,7 @@ class VispyPlotterWidget(QWidget):
                 colors[i, 3] = opacities[i]
             
         # Update scatter plot
-        self.graphics_widget.scatter.set_data(
+        self.canvas.scatter.set_data(
             pos=np.column_stack([self.data_x, self.data_y]),
             face_color=colors,
             size=sizes,
@@ -895,15 +950,15 @@ class VispyPlotterWidget(QWidget):
         )
             
         # If we have selected points, update their highlighting too
-        if hasattr(self.graphics_widget, 'selected_mask') and self.graphics_widget.selected_mask is not None:
-            mask = self.graphics_widget.selected_mask
+        if hasattr(self.canvas, 'selected_mask') and self.canvas.selected_mask is not None:
+            mask = self.canvas.selected_mask
             if np.any(mask):
                 highlight_colors = colors.copy()
                 # Apply yellow color to selected points while preserving opacity
                 for i in np.where(mask)[0]:
                     highlight_colors[i, 0:3] = [1.0, 1.0, 0.0]  # Yellow
                 
-                self.graphics_widget.scatter.set_data(
+                self.canvas.scatter.set_data(
                     pos=np.column_stack([self.data_x, self.data_y]),
                     face_color=highlight_colors,
                     size=sizes,
@@ -934,111 +989,141 @@ class VispyPlotterWidget(QWidget):
         self.run()
     
     def run(self):
-        """Run the plotting with the current settings"""
-        selected_layer = self.get_selected_layer()
-        if selected_layer is None:
+        """Run the plotting operation"""
+        # Get the selected layer
+        self.analysed_layer = self.get_selected_layer()
+        if self.analysed_layer is None:
+            print("No layer selected")
             return
         
-        # Get features from layer
-        features = self.get_layer_tabular_data(selected_layer)
-        if features is None or len(features) == 0:
+        # Get the tabular data
+        features = self.get_layer_tabular_data(self.analysed_layer)
+        if features is None:
+            print(f"Layer {self.analysed_layer.name} has no features")
             return
         
-        # Get axis names
-        plot_x_axis_name = self.plot_x_axis.currentText()
-        plot_y_axis_name = self.plot_y_axis.currentText()
+        # Get the selected axes
+        x_axis = self.plot_x_axis.currentText()
+        y_axis = self.plot_y_axis.currentText()
         
-        # Check if axes exist in features
-        if plot_x_axis_name not in features.columns or plot_y_axis_name not in features.columns:
+        if x_axis == "" or y_axis == "":
+            print("Please select axes for plotting")
             return
         
-        # Store current settings
-        self.data_x = features[plot_x_axis_name].to_numpy()
-        self.data_y = features[plot_y_axis_name].to_numpy()
-        
-        # Apply coordinate transformation based on layer type
-        # For Labels layer, we need to ensure proper orientation for spatial coordinates
-        if isinstance(selected_layer, Labels):
-            # Check if we're plotting spatial coordinates that need adjustment
-            spatial_coords_y = ['centroid_y', 'y']
-            if plot_y_axis_name in spatial_coords_y:
-                print(f"Applying y-axis flip for Labels layer spatial coordinate: {plot_y_axis_name}")
-                # Negate y to make it increase downward (standard image coordinates)
-                self.data_y = -self.data_y
-        
-        self.plot_x_axis_name = plot_x_axis_name
-        self.plot_y_axis_name = plot_y_axis_name
-        self.analysed_layer = selected_layer
-        
-        # Initialize class assignments if needed
-        if self.class_assignments is None or len(self.class_assignments) != len(self.data_x):
-            self.class_assignments = np.zeros(len(self.data_x), dtype=int)
-        
-        # Get plotting type
-        plotting_type = PlottingType[self.plotting_type.currentText()]
-        
-        # Get bin number for histograms
-        bin_number = self.bin_number_spinner.value()
-        if self.bin_auto.isChecked():
-            bin_number = self.estimate_bin_number()
-        
-        # Get log scale option
-        log_scale = self.log_scale.isChecked()
-        
-        # Determine if we're using clustering
-        self.cluster_ids = None
-        colors = np.ones((len(self.data_x), 4), dtype=np.float32) * 0.7  # Default gray
-        
-        # Auto-detect clustering columns
-        cluster_columns = [col for col in features.columns if 'CLUSTER' in col.upper() or 'LABEL' in col.upper()]
-        if cluster_columns:
-            # Use the first clustering column found
-            cluster_column = cluster_columns[0]
-            self.cluster_ids = features[cluster_column].fillna(-1).to_numpy()
-            colors = self.get_cluster_colors(self.cluster_ids)
-        
-        # Create sizes array (all same size for now)
-        sizes = np.ones(len(self.data_x)) * 10
-        
-        # Store colors for later use
-        self.colors = colors
-        
-        # Create the plot based on the plotting type
-        if plotting_type == PlottingType.SCATTER:
-            self.graphics_widget.make_scatter_plot(
-                self.data_x, self.data_y, colors, sizes
-            )
-            self.graphics_widget.set_labels(plot_x_axis_name, plot_y_axis_name)
+        # Get the data for the selected axes
+        if x_axis in features.columns and y_axis in features.columns:
+            x_data = features[x_axis].values
+            y_data = features[y_axis].values
             
-            # Show colormap option for scatter plots
-            self.colormap_container.setVisible(True)
+            # Store the data for later use
+            self.data_x = x_data
+            self.data_y = y_data
             
-            # Update point highlighting based on current slice
-            self._update_point_highlighting()
+            # Store the full plot data for selection mapping
+            self.plot_data = np.column_stack([x_data, y_data])
             
-        elif plotting_type == PlottingType.HISTOGRAM:
-            if plot_x_axis_name == plot_y_axis_name:
-                # 1D histogram
-                self.graphics_widget.make_1d_histogram(
-                    self.data_x, bin_number=bin_number, log_scale=log_scale
-                )
-                self.graphics_widget.set_labels(plot_x_axis_name, "Count")
+            # Store the full features dataframe for more accurate mapping
+            self.features_df = features
+            
+            # Store the indices for mapping between napari and the plot
+            if 'index' in features.columns:
+                self.data_indices = features['index'].values
+            elif 'label' in features.columns:
+                self.data_indices = features['label'].values
             else:
-                # 2D histogram
-                self.graphics_widget.make_2d_histogram(
-                    self.data_x, self.data_y, bin_number=bin_number, log_scale=log_scale
-                )
-                self.graphics_widget.set_labels(plot_x_axis_name, plot_y_axis_name)
+                # Use row indices as a fallback
+                self.data_indices = np.arange(len(features))
             
-            # Hide colormap option for histograms
-            self.colormap_container.setVisible(False)
-        
-        # Update the visualized layer
-        self.visualized_layer = selected_layer
+            # Store coordinate columns if available for more accurate mapping
+            self.coord_columns = {}
+            for coord in ['x', 'y', 'z', 'centroid_x', 'centroid_y', 'centroid_z']:
+                if coord in features.columns:
+                    self.coord_columns[coord] = features[coord].values
+            
+            # Reset class assignments
+            if self.class_assignments is not None:
+                self.class_assignments = np.zeros(len(x_data), dtype=int)
+            
+            # Check for clustering column
+            cluster_column = None
+            for col in features.columns:
+                if 'CLUSTER' in col.upper() or 'CLASS' in col.upper():
+                    cluster_column = col
+                    break
+            
+            # Set up colors based on clustering if available
+            if cluster_column is not None:
+                cluster_ids = features[cluster_column].values
+                self.colors = self.get_cluster_colors(cluster_ids)
+                print(f"Using {cluster_column} for coloring points")
+            else:
+                # Default coloring
+                self.colors = np.ones((len(x_data), 4))
+                self.colors[:, 0:3] = [0.5, 0.5, 1.0]  # Light blue
+                self.colors[:, 3] = 0.7  # Alpha
+            
+            # Store the original colors for selection highlighting
+            self.original_colors = self.colors.copy()
+            
+            # Clear the canvas
+            self.canvas.reset()
+            
+            # Set labels
+            self.canvas.set_labels(x_axis, y_axis)
+            
+            # Get the plotting type
+            plot_type = self.plotting_type.currentText()
+            
+            # Create the plot based on the selected type
+            if plot_type == PlottingType.SCATTER.name:
+                # Create a scatter plot
+                self.canvas.make_scatter_plot(
+                    x_data, 
+                    y_data, 
+                    self.colors,
+                    np.ones(len(x_data)) * 10,  # Size
+                    alpha=0.7
+                )
+                
+                # Update point highlighting based on current slice
+                self._update_point_highlighting()
+                
+            elif plot_type == PlottingType.HISTOGRAM.name:
+                # Get bin number
+                if self.bin_auto.isChecked():
+                    bin_number = self.estimate_bin_number()
+                else:
+                    bin_number = self.bin_number_spinner.value()
+                
+                # Check if we're making a 1D or 2D histogram
+                if x_axis == y_axis:
+                    # 1D histogram
+                    self.canvas.make_1d_histogram(
+                        x_data,
+                        bin_number=bin_number,
+                        log_scale=self.log_scale.isChecked()
+                    )
+                else:
+                    # 2D histogram
+                    self.canvas.make_2d_histogram(
+                        x_data,
+                        y_data,
+                        bin_number=bin_number,
+                        log_scale=self.log_scale.isChecked()
+                    )
+            
+            # Update the UI
+            self.run_button.setEnabled(True)
+            self.selection_info.setText("Hold Shift + drag to select points with lasso (empty selection clears all classes)")
+            
+            # Debug: Compare coordinates
+            self._debug_compare_coordinates(self.analysed_layer)
+        else:
+            print(f"Axes {x_axis} or {y_axis} not found in features")
     
     def estimate_bin_number(self):
         """Estimate a reasonable number of bins for histograms"""
-        if self.plot_x_axis_name == self.plot_y_axis_name:
+        if self.plot_x_axis.currentText() == self.plot_y_axis.currentText():
             # For 1D histogram
             return min(int(np.sqrt(len(self.data_x))), 100)
         else:
@@ -1069,10 +1154,10 @@ class VispyPlotterWidget(QWidget):
     
     def update_colormap(self):
         """Update the colormap when the dropdown changes"""
-        if self.cluster_ids is not None and hasattr(self.graphics_widget, 'scatter') and self.graphics_widget.scatter is not None:
+        if self.cluster_ids is not None and hasattr(self.canvas, 'scatter') and self.canvas.scatter is not None:
             colors = self.get_cluster_colors(self.cluster_ids)
             self.colors = colors
-            self.graphics_widget.scatter.set_data(
+            self.canvas.scatter.set_data(
                 pos=np.column_stack([self.data_x, self.data_y]),
                 face_color=colors,
                 size=np.ones(len(self.data_x)) * 10,
@@ -1103,7 +1188,7 @@ class VispyPlotterWidget(QWidget):
     
     def _update_class_visualization(self):
         """Update the visualization of classes in the plot"""
-        if self.analysed_layer is None or not hasattr(self.graphics_widget, 'scatter') or self.graphics_widget.scatter is None:
+        if self.analysed_layer is None or not hasattr(self.canvas, 'scatter') or self.canvas.scatter is None:
             return
             
         if self.class_assignments is None or len(self.class_assignments) == 0 or np.all(self.class_assignments == 0):
@@ -1128,7 +1213,7 @@ class VispyPlotterWidget(QWidget):
         self.colors = colors
         
         # Update scatter plot
-        self.graphics_widget.scatter.set_data(
+        self.canvas.scatter.set_data(
             pos=np.column_stack([self.data_x, self.data_y]),
             face_color=colors,
             size=np.ones(len(self.data_x)) * 10,
@@ -1320,3 +1405,273 @@ class VispyPlotterWidget(QWidget):
                     layer.n_dimensional = True
                 elif isinstance(layer, Labels) and layer.name.endswith('_classes'):
                     layer.depiction = 'volume' 
+
+    def _on_active_layer_change(self, event=None):
+        """Handle changes in the active layer in napari"""
+        # Get the active layer
+        active_layer = self.viewer.layers.selection.active
+        
+        # Store the active layer for reference
+        self.napari_active_layer = active_layer
+        
+        # Reset the last selection state
+        self.last_selection_state = None
+
+    def _check_napari_selection(self):
+        """Periodically check for selection changes in the active layer"""
+        if not hasattr(self, 'napari_active_layer') or self.napari_active_layer is None:
+            return
+        
+        # Get the active layer
+        layer = self.napari_active_layer
+        
+        # Only process Points and Labels layers
+        if not isinstance(layer, (Points, Labels)):
+            return
+        
+        # For Points layers, check the selected property
+        if isinstance(layer, Points) and hasattr(layer, 'selected'):
+            # Get the current selection state
+            current_selection = layer.selected.copy() if hasattr(layer.selected, 'copy') else layer.selected
+            
+            # Check if the selection has changed
+            if self.last_selection_state is None or not np.array_equal(current_selection, self.last_selection_state):
+                # Update the last selection state
+                self.last_selection_state = current_selection.copy() if hasattr(current_selection, 'copy') else current_selection
+                
+                # Get the selected indices
+                selected_indices = np.where(current_selection)[0]
+                
+                # Store the selected indices
+                self.napari_selected_indices = selected_indices
+                
+                # Update selection info
+                if len(selected_indices) > 0:
+                    self.selection_info.setText(f"{len(selected_indices)} points selected from napari viewer")
+                    
+                    # Highlight the selected points in the plot
+                    if hasattr(self, 'plot_data') and self.plot_data is not None:
+                        # Create a mask for the selected points
+                        mask = np.zeros(self.plot_data.shape[0], dtype=bool)
+                        
+                        # Map the selected indices to the plot data indices
+                        if hasattr(self, 'data_indices') and self.data_indices is not None:
+                            # Find which indices in data_indices match the selected indices
+                            for idx in selected_indices:
+                                mask |= (self.data_indices == idx)
+                        else:
+                            # If no mapping is available, try direct indexing
+                            if len(selected_indices) > 0 and np.max(selected_indices) < self.plot_data.shape[0]:
+                                mask[selected_indices] = True
+                        
+                        # Highlight the selected points
+                        self._highlight_napari_selection(mask)
+                else:
+                    # Clear the highlighting if no points are selected
+                    self._highlight_napari_selection(np.zeros(self.plot_data.shape[0] if hasattr(self, 'plot_data') else 0, dtype=bool))
+
+    def _highlight_napari_selection(self, mask):
+        """Highlight points in the plot based on napari selection"""
+        if not hasattr(self.canvas, 'scatter'):
+            return
+        
+        # Get the scatter plot
+        scatter = self.canvas.scatter
+        
+        if scatter is None:
+            return
+        
+        # Store the current colors
+        if not hasattr(self, 'original_colors'):
+            self.original_colors = scatter.face_color.copy()
+        
+        # Create a copy of the original colors
+        colors = self.original_colors.copy()
+        
+        # Create sizes array (default size for all points)
+        sizes = np.ones(len(colors)) * 10
+        
+        # If we have a valid mask, highlight the selected points
+        if mask is not None and np.any(mask):
+            # Set the selected points to yellow
+            colors[mask] = [1.0, 1.0, 0.0, 1.0]  # Yellow with full opacity
+            
+            # Make selected points larger
+            sizes[mask] = 20  # Double the size of selected points
+        
+        # Update the scatter plot with new colors and sizes
+        scatter.set_data(
+            pos=np.column_stack([self.data_x, self.data_y]),
+            face_color=colors,
+            size=sizes,
+            edge_width=0
+        )
+        
+        # Trigger a redraw
+        self.canvas.update()
+
+    def _on_napari_mouse_click(self, viewer, event):
+        """Handle mouse click events in napari"""
+        # Only process click events (not drag events)
+        if event.type == 'mouse_press':
+            # Get the active layer
+            active_layer = self.viewer.layers.selection.active
+            
+            # Only process Points and Labels layers
+            if active_layer is None or not isinstance(active_layer, (Points, Labels)):
+                return
+            
+            # Get the value under the cursor
+            value = active_layer.get_value(
+                position=viewer.cursor.position,
+                view_direction=viewer.camera.view_direction,
+                dims_displayed=viewer.dims.displayed,
+                world=True
+            )
+            
+            # For Points layers, value is the index of the clicked point
+            if isinstance(active_layer, Points) and value is not None:
+                print(f"Clicked on point with index {value} in layer {active_layer.name}")
+                
+                # Get the coordinates of the clicked point
+                if value < len(active_layer.data):
+                    point_coords = active_layer.data[value]
+                    print(f"Point coordinates in napari: {point_coords}")
+                    
+                    # Highlight the point in the plot
+                    if hasattr(self, 'plot_data') and self.plot_data is not None:
+                        # Create a mask for the selected point
+                        mask = np.zeros(self.plot_data.shape[0], dtype=bool)
+                        
+                        # Try to map using coordinates if available
+                        if hasattr(self, 'features_df') and self.analysed_layer == active_layer:
+                            # Check if we have the right columns for mapping
+                            if 'index' in self.features_df.columns:
+                                # Direct mapping by index
+                                if value < len(self.features_df):
+                                    idx = self.features_df.index[self.features_df['index'] == value]
+                                    if len(idx) > 0:
+                                        mask[idx[0]] = True
+                                        print(f"Mapped to plot index {idx[0]} using index column")
+                                        if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                            print(f"Plot coordinates: ({self.data_x[idx[0]]}, {self.data_y[idx[0]]})")
+                            elif all(col in self.features_df.columns for col in ['x', 'y', 'z']):
+                                # Find the row with matching coordinates
+                                matches = (
+                                    (np.abs(self.features_df['x'] - point_coords[0]) < 1e-6) &
+                                    (np.abs(self.features_df['y'] - point_coords[1]) < 1e-6) &
+                                    (np.abs(self.features_df['z'] - point_coords[2]) < 1e-6)
+                                )
+                                if np.any(matches):
+                                    idx = np.where(matches)[0][0]
+                                    mask[idx] = True
+                                    print(f"Mapped to plot index {idx} using exact coordinate match")
+                                    if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                        print(f"Plot coordinates: ({self.data_x[idx]}, {self.data_y[idx]})")
+                                else:
+                                    # Find the closest point by coordinates
+                                    distances = np.sqrt(
+                                        (self.features_df['x'] - point_coords[0])**2 +
+                                        (self.features_df['y'] - point_coords[1])**2 +
+                                        (self.features_df['z'] - point_coords[2])**2
+                                    )
+                                    closest_idx = np.argmin(distances)
+                                    mask[closest_idx] = True
+                                    print(f"Mapped to plot index {closest_idx} using closest coordinates")
+                                    print(f"Distance: {distances[closest_idx]}")
+                                    if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                        print(f"Plot coordinates: ({self.data_x[closest_idx]}, {self.data_y[closest_idx]})")
+                            else:
+                                # Fall back to index mapping
+                                if hasattr(self, 'data_indices') and self.data_indices is not None:
+                                    # Find which index in data_indices matches the selected index
+                                    idx = np.where(self.data_indices == value)[0]
+                                    if len(idx) > 0:
+                                        mask[idx[0]] = True
+                                        print(f"Mapped to plot index {idx[0]} using data_indices")
+                                        if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                            print(f"Plot coordinates: ({self.data_x[idx[0]]}, {self.data_y[idx[0]]})")
+                                else:
+                                    # If no mapping is available, try direct indexing
+                                    if value < self.plot_data.shape[0]:
+                                        mask[value] = True
+                                        print(f"Mapped to plot using direct indexing")
+                                        if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                            print(f"Plot coordinates: ({self.data_x[value]}, {self.data_y[value]})")
+                        else:
+                            # Fall back to index mapping
+                            if hasattr(self, 'data_indices') and self.data_indices is not None:
+                                # Find which index in data_indices matches the selected index
+                                idx = np.where(self.data_indices == value)[0]
+                                if len(idx) > 0:
+                                    mask[idx[0]] = True
+                                    print(f"Mapped to plot index {idx[0]} using data_indices")
+                                    if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                        print(f"Plot coordinates: ({self.data_x[idx[0]]}, {self.data_y[idx[0]]})")
+                            else:
+                                # If no mapping is available, try direct indexing
+                                if value < self.plot_data.shape[0]:
+                                    mask[value] = True
+                                    print(f"Mapped to plot using direct indexing")
+                                    if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                        print(f"Plot coordinates: ({self.data_x[value]}, {self.data_y[value]})")
+                        
+                        # Highlight the selected point
+                        self._highlight_napari_selection(mask)
+                        
+                        # Update selection info
+                        self.selection_info.setText(f"Point {value} selected from napari viewer")
+            
+            # For Labels layers, value is the label value at the clicked position
+            elif isinstance(active_layer, Labels) and value > 0:  # 0 is background
+                print(f"Clicked on label with value {value} in layer {active_layer.name}")
+                
+                # Get the position of the clicked point
+                position = viewer.cursor.position
+                print(f"Clicked at position: {position}")
+                
+                # Highlight the label in the plot
+                if hasattr(self, 'plot_data') and self.plot_data is not None:
+                    # Create a mask for the selected label
+                    mask = np.zeros(self.plot_data.shape[0], dtype=bool)
+                    
+                    # Try to map using label value if available
+                    if hasattr(self, 'features_df') and self.analysed_layer == active_layer:
+                        if 'label' in self.features_df.columns:
+                            # Find rows with matching label value
+                            matches = self.features_df['label'] == value
+                            if np.any(matches):
+                                idx = np.where(matches)[0]
+                                mask[idx] = True
+                                print(f"Mapped to plot indices {idx} using label value")
+                                if hasattr(self, 'data_x') and hasattr(self, 'data_y') and len(idx) > 0:
+                                    print(f"Plot coordinates: ({self.data_x[idx[0]]}, {self.data_y[idx[0]]})")
+                        else:
+                            # If no exact match, find the closest centroid
+                            if all(col in self.features_df.columns for col in ['centroid_x', 'centroid_y', 'centroid_z']):
+                                distances = np.sqrt(
+                                    (self.features_df['centroid_x'] - position[0])**2 +
+                                    (self.features_df['centroid_y'] - position[1])**2 +
+                                    (self.features_df['centroid_z'] - position[2])**2
+                                )
+                                closest_idx = np.argmin(distances)
+                                mask[closest_idx] = True
+                                print(f"Mapped to plot index {closest_idx} using closest centroid")
+                                if hasattr(self, 'data_x') and hasattr(self, 'data_y'):
+                                    print(f"Plot coordinates: ({self.data_x[closest_idx]}, {self.data_y[closest_idx]})")
+                    else:
+                        # Fall back to index mapping
+                        if hasattr(self, 'data_indices') and self.data_indices is not None:
+                            # Find which indices in data_indices match the selected label
+                            idx = np.where(self.data_indices == value)[0]
+                            if len(idx) > 0:
+                                mask[idx] = True
+                                print(f"Mapped to plot indices {idx} using data_indices")
+                                if hasattr(self, 'data_x') and hasattr(self, 'data_y') and len(idx) > 0:
+                                    print(f"Plot coordinates: ({self.data_x[idx[0]]}, {self.data_y[idx[0]]})")
+                
+                    # Highlight the selected label
+                    self._highlight_napari_selection(mask)
+                    
+                    # Update selection info
+                    self.selection_info.setText(f"Label {value} selected from napari viewer") 
