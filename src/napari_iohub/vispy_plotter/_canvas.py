@@ -18,12 +18,6 @@ import vispy.visuals as visuals
 from ._utils import estimate_bin_number
 
 
-class PlottingType(Enum):
-    """Enum for different plotting types."""
-    SCATTER = auto()
-    HISTOGRAM = auto()
-
-
 class VispyCanvas(QWidget):
     """Canvas for Vispy visualization with lasso selection capability.
     
@@ -428,7 +422,7 @@ class VispyCanvas(QWidget):
         self.view.camera.set_range()
     
     def _add_axis_with_ticks(self, x_min, x_max, y_min, y_max):
-        """Add axis with ticks and labels to the plot.
+        """Add axis with ticks and labels.
         
         Args:
             x_min: Minimum x value.
@@ -436,149 +430,52 @@ class VispyCanvas(QWidget):
             y_min: Minimum y value.
             y_max: Maximum y value.
         """
-        # Create axis visuals
-        x_axis = scene.visuals.Line(pos=np.array([[x_min, y_min], [x_max, y_min]]), color='white', width=2)
-        y_axis = scene.visuals.Line(pos=np.array([[x_min, y_min], [x_min, y_max]]), color='white', width=2)
+        # Create axis
+        self.axis = scene.visuals.Axis(
+            pos=[[x_min, y_min], [x_max, y_min], [x_min, y_min], [x_min, y_max]],
+            tick_direction=(0, -1),
+            parent=self.view.scene
+        )
         
-        # Add axes to the scene
-        self.view.add(x_axis)
-        self.view.add(y_axis)
+        # Add ticks
+        self.axis.transform = scene.transforms.STTransform()
         
-        # Create tick marks and labels
-        # X-axis ticks
-        x_ticks = np.linspace(x_min, x_max, 5)
-        for x in x_ticks:
-            # Tick mark
-            tick = scene.visuals.Line(pos=np.array([[x, y_min], [x, y_min - (y_max - y_min) * 0.02]]), color='white', width=1)
-            self.view.add(tick)
+        # Add axis labels if they exist
+        if hasattr(self, 'x_label_text') and hasattr(self, 'y_label_text'):
+            # Create x-axis label
+            self.x_label = Text(
+                text=self.x_label_text,
+                pos=[x_min + (x_max - x_min) / 2, y_min - (y_max - y_min) * 0.1],
+                color='white',
+                font_size=10,
+                anchor_x='center',
+                anchor_y='top',
+                parent=self.view.scene
+            )
             
-            # Tick label
-            label = scene.visuals.Text(text=f"{x:.2f}", pos=[x, y_min - (y_max - y_min) * 0.05], color='white', font_size=8)
-            self.view.add(label)
-            
-            # Vertical grid line
-            grid_line = scene.visuals.Line(pos=np.array([[x, y_min], [x, y_max]]), color='white', width=0.5)
-            grid_line.set_gl_state(blend=True)
-            grid_line.opacity = 0.2
-            self.view.add(grid_line)
+            # Create y-axis label
+            self.y_label = Text(
+                text=self.y_label_text,
+                pos=[x_min - (x_max - x_min) * 0.15, y_min + (y_max - y_min) / 2],
+                color='white',
+                font_size=10,
+                anchor_x='center',
+                anchor_y='bottom',
+                rotation=-90,
+                parent=self.view.scene
+            )
+    
+    def _add_axis_labels(self, x_label, y_label):
+        """Add axis labels.
         
-        # Y-axis ticks
-        y_ticks = np.linspace(y_min, y_max, 5)
-        for y in y_ticks:
-            # Tick mark
-            tick = scene.visuals.Line(pos=np.array([[x_min, y], [x_min - (x_max - x_min) * 0.02, y]]), color='white', width=1)
-            self.view.add(tick)
-            
-            # Tick label
-            label = scene.visuals.Text(text=f"{y:.2f}", pos=[x_min - (x_max - x_min) * 0.1, y], color='white', font_size=8)
-            self.view.add(label)
-            
-            # Horizontal grid line
-            grid_line = scene.visuals.Line(pos=np.array([[x_min, y], [x_max, y]]), color='white', width=0.5)
-            grid_line.set_gl_state(blend=True)
-            grid_line.opacity = 0.2
-            self.view.add(grid_line)
-        
+        Args:
+            x_label: X-axis label.
+            y_label: Y-axis label.
+        """
         # Update axis labels
-        self.x_label.text = self.x_label_text
-        self.y_label.text = self.y_label_text
-    
-    def make_2d_histogram(self, x_data, y_data, bin_number=100, log_scale=False):
-        """Create a 2D histogram.
+        x_label.text = self.x_label_text
+        y_label.text = self.y_label_text
         
-        Args:
-            x_data: X coordinates of points.
-            y_data: Y coordinates of points.
-            bin_number: Number of bins.
-            log_scale: Whether to use log scale.
-        """
-        # Clear any existing plot
-        self.reset()
-        
-        # Store data for reference
-        self.x_data = x_data
-        self.y_data = y_data
-        
-        # Calculate histogram
-        H, xedges, yedges = np.histogram2d(x_data, y_data, bins=bin_number)
-        
-        # Apply log scale if requested
-        if log_scale:
-            H = np.log1p(H)
-        
-        # Normalize histogram
-        H = H / np.max(H)
-        
-        # Create image visual
-        self.histogram = visuals.Image(
-            H.T,  # Transpose to match orientation
-            cmap='viridis',
-            parent=self.view.scene
-        )
-        
-        # Set image position and scale
-        x_min, x_max = np.min(x_data), np.max(x_data)
-        y_min, y_max = np.min(y_data), np.max(y_data)
-        self.histogram.transform = scene.transforms.STTransform(
-            scale=(
-                (x_max - x_min) / bin_number,
-                (y_max - y_min) / bin_number
-            ),
-            translate=(x_min, y_min)
-        )
-        
-        # Add axis with ticks and labels
-        self._add_axis_with_ticks(x_min, x_max, y_min, y_max)
-        
-        # Reset zoom to fit all data
-        self.view.camera.set_range()
-    
-    def make_1d_histogram(self, data, bin_number=100, log_scale=False):
-        """Create a 1D histogram.
-        
-        Args:
-            data: Data to plot.
-            bin_number: Number of bins.
-            log_scale: Whether to use log scale.
-        """
-        # Clear any existing plot
-        self.reset()
-        
-        # Store data for reference
-        self.x_data = data
-        
-        # Calculate histogram
-        hist, bin_edges = np.histogram(data, bins=bin_number)
-        
-        # Apply log scale if requested
-        if log_scale:
-            hist = np.log1p(hist)
-        
-        # Normalize histogram
-        hist = hist / np.max(hist)
-        
-        # Create bar visual
-        bin_centers = (bin_edges[:-1] + bin_edges[1:]) / 2
-        bin_width = bin_edges[1] - bin_edges[0]
-        
-        # Create line visual for histogram
-        pos = []
-        for i, (x, h) in enumerate(zip(bin_centers, hist)):
-            pos.append([x, 0])
-            pos.append([x, h])
-        
-        self.histogram = visuals.Line(
-            pos=np.array(pos),
-            color='white',
-            width=2,
-            connect='segments',
-            parent=self.view.scene
-        )
-        
-        # Add axis with ticks and labels
-        x_min, x_max = np.min(data), np.max(data)
-        y_min, y_max = 0, 1
-        self._add_axis_with_ticks(x_min, x_max, y_min, y_max)
-        
-        # Reset zoom to fit all data
-        self.view.camera.set_range() 
+        # Add axis labels to the scene
+        self.view.scene.add(x_label)
+        self.view.scene.add(y_label) 

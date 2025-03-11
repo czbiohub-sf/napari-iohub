@@ -216,13 +216,10 @@ def main():
     print("2. Plot 'PCA_1' vs 'PCA_2' - clustering will be automatically detected")
     print("3. Plot 'z' vs 'intensity'")
     
-    print("\nTry both scatter plot and histogram visualization modes")
-    
     print("\nNote on Vispy Plotter:")
     print("- The Vispy plotter is optimized for performance with large datasets")
     print("- It uses hardware acceleration via OpenGL for rendering")
     print("- Scatter plots support millions of points with interactive performance")
-    print("- Histograms provide efficient visualization of data distributions")
     print("- Clustering columns are automatically detected and used for coloring points")
     print("- Points are highlighted based on the current slice position")
     print("- Try scrolling through the Z dimension to see points change opacity and size")

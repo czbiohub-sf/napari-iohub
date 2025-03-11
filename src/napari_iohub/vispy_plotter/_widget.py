@@ -24,7 +24,7 @@ from qtpy.QtWidgets import (
     QWidget,
 )
 
-from ._canvas import PlottingType, VispyCanvas
+from ._canvas import VispyCanvas
 from ._utils import estimate_bin_number, get_cluster_colors, points_in_current_slice
 
 
@@ -191,37 +191,6 @@ class VispyPlotterWidget(QWidget):
         advanced_container.setLayout(QVBoxLayout())
         advanced_container.setStyleSheet("background-color: rgba(40, 40, 40, 100); border-radius: 5px;")
         
-        # Plot type selection
-        plot_type_container = QWidget()
-        plot_type_container.setLayout(QHBoxLayout())
-        plot_type_container.setStyleSheet("background-color: rgba(50, 50, 50, 80);")
-        plot_type_label = QLabel("Plot type")
-        plot_type_label.setStyleSheet("color: white;")
-        plot_type_container.layout().addWidget(plot_type_label)
-        self.plot_type = QComboBox()
-        self.plot_type.setStyleSheet("background-color: rgba(60, 60, 60, 150); color: white; selection-background-color: rgba(80, 80, 80, 200);")
-        self.plot_type.addItems([PlottingType.SCATTER.name, PlottingType.HISTOGRAM.name])
-        plot_type_container.layout().addWidget(self.plot_type)
-        advanced_container.layout().addWidget(plot_type_container)
-        
-        # Bin number selection
-        self.bin_number_container = QWidget()
-        self.bin_number_container.setLayout(QHBoxLayout())
-        self.bin_number_container.setStyleSheet("background-color: rgba(50, 50, 50, 80);")
-        bin_number_label = QLabel("Bin number")
-        bin_number_label.setStyleSheet("color: white;")
-        self.bin_auto = QCheckBox("Auto")
-        self.bin_auto.setStyleSheet("color: white;")
-        self.bin_auto.setChecked(True)
-        self.bin_number_container.layout().addWidget(bin_number_label)
-        self.bin_number_container.layout().addWidget(self.bin_auto)
-        self.bin_number = QSpinBox()
-        self.bin_number.setStyleSheet("background-color: rgba(60, 60, 60, 150); color: white;")
-        self.bin_number.setRange(2, 1000)
-        self.bin_number.setValue(100)
-        self.bin_number_container.layout().addWidget(self.bin_number)
-        advanced_container.layout().addWidget(self.bin_number_container)
-        
         # Colormap selection
         self.colormap_container = QWidget()
         self.colormap_container.setLayout(QHBoxLayout())
@@ -239,6 +208,19 @@ class VispyPlotterWidget(QWidget):
         self.colormap_container.layout().addWidget(self.colormap)
         advanced_container.layout().addWidget(self.colormap_container)
         
+        # Color by feature selection
+        self.color_feature_container = QWidget()
+        self.color_feature_container.setLayout(QHBoxLayout())
+        self.color_feature_container.setStyleSheet("background-color: rgba(50, 50, 50, 80);")
+        color_feature_label = QLabel("Color by")
+        color_feature_label.setStyleSheet("color: white;")
+        self.color_feature_combo = QComboBox()
+        self.color_feature_combo.setStyleSheet("background-color: rgba(60, 60, 60, 150); color: white; selection-background-color: rgba(80, 80, 80, 200);")
+        self.color_feature_combo.addItem("Auto (Cluster)")  # Default option to use cluster column
+        self.color_feature_container.layout().addWidget(color_feature_label)
+        self.color_feature_container.layout().addWidget(self.color_feature_combo)
+        advanced_container.layout().addWidget(self.color_feature_container)
+        
         # Add widgets to layout
         layout.addWidget(graph_container, stretch=3)
         layout.addWidget(self.selection_info)
@@ -248,9 +230,8 @@ class VispyPlotterWidget(QWidget):
         # Connect signals
         self.layer_combo.currentIndexChanged.connect(self.update_axes_and_clustering_id_lists)
         # Don't connect axis dropdowns to the update method to avoid recursion
-        self.plot_type.currentIndexChanged.connect(self.plotting_type_changed)
-        self.bin_auto.stateChanged.connect(self.bin_auto_changed)
         self.colormap.currentIndexChanged.connect(self.update_colormap)
+        self.color_feature_combo.currentIndexChanged.connect(self.plot_clicked)
         self.run_button.clicked.connect(self.plot_clicked)
         
         # Connect to napari events
@@ -268,8 +249,6 @@ class VispyPlotterWidget(QWidget):
         self.selection_timer.start(100)  # Check every 100ms
         
         # Initial UI state
-        self.bin_auto_changed()  # Update bin number spinner state
-        self.plotting_type_changed()  # Update UI based on plotting type
         self.update_layer_list()  # Populate layer list
 
     def update_layer_list(self, event=None):
@@ -316,6 +295,8 @@ class VispyPlotterWidget(QWidget):
         # Clear existing items
         self.plot_x_axis.clear()
         self.plot_y_axis.clear()
+        self.color_feature_combo.clear()
+        self.color_feature_combo.addItem("Auto (Cluster)")  # Default option to use cluster column
         
         # Get the selected layer
         layer_name = self.layer_combo.currentText()
@@ -341,6 +322,7 @@ class VispyPlotterWidget(QWidget):
         for column in features.columns:
             self.plot_x_axis.addItem(column)
             self.plot_y_axis.addItem(column)
+            self.color_feature_combo.addItem(column)  # Add to color feature dropdown
         
         # Try to select default axes
         default_x_axes = ["UMAP_1", "PCA_1", "x", "centroid_x"]
@@ -582,6 +564,9 @@ class VispyPlotterWidget(QWidget):
                     for label in selected_labels:
                         highlight_data[self.analysed_layer.data == label] = 1
                     
+                    # Store the original visibility state
+                    original_visible = self.analysed_layer.visible
+                    
                     # Get the next class ID and color
                     next_class = 1
                     if hasattr(self, 'class_assignments') and self.class_assignments is not None and np.any(self.class_assignments > 0):
@@ -609,35 +594,26 @@ class VispyPlotterWidget(QWidget):
                             opacity=0.7
                         )
                     
-                    # Set a timer to remove the highlight layer after 2 seconds
-                    if hasattr(self, 'highlight_reset_timer'):
-                        self.highlight_reset_timer.stop()
-                    else:
-                        self.highlight_reset_timer = QTimer()
-                        self.highlight_reset_timer.setSingleShot(True)
-                        self.highlight_reset_timer.timeout.connect(
-                            lambda: self._remove_highlight_layer(highlight_layer_name)
-                        )
+                    # Make sure the original layer is still visible
+                    self.analysed_layer.visible = original_visible
                     
-                    self.highlight_reset_timer.start(2000)  # 2 seconds
 
     def _reset_point_colors(self):
         """Reset point colors to their original values."""
         print("Reset point colors to original values")
         if hasattr(self, 'analysed_layer') and isinstance(self.analysed_layer, Points) and hasattr(self, 'original_point_colors'):
-            self.analysed_layer.face_color = self.original_point_colors
+            # Make sure original_point_colors is not None
+            if self.original_point_colors is not None:
+                self.analysed_layer.face_color = self.original_point_colors.copy()
+            else:
+                # If original colors are None, set a default color
+                default_color = np.array([0.5, 0.5, 1.0, 0.7])  # Light blue
+                if len(self.analysed_layer.data) > 0:
+                    self.analysed_layer.face_color = np.tile(default_color, (len(self.analysed_layer.data), 1))
+            
             # Clear selection
             self.analysed_layer.selected_data = {}
 
-    def _remove_highlight_layer(self, layer_name):
-        """Remove the highlight layer.
-        
-        Args:
-            layer_name: Name of the layer to remove.
-        """
-        if hasattr(self, 'viewer') and layer_name in self.viewer.layers:
-            self.viewer.layers.remove(layer_name)
-            print(f"Removed highlight layer: {layer_name}")
 
     def _remove_class_layers(self):
         """Remove all class layers from napari."""
@@ -651,86 +627,6 @@ class VispyPlotterWidget(QWidget):
         if hasattr(self, 'analysed_layer') and self.analysed_layer is not None:
             # Re-run the plotting to update the colormap
             self.plot()
-
-    def plotting_type_changed(self):
-        """Handle changes to the plotting type."""
-        # Show/hide bin number container based on plotting type
-        plotting_type = self.plot_type.currentText()
-        self.bin_number_container.setVisible(plotting_type == PlottingType.HISTOGRAM.name)
-        
-        # Show/hide colormap container based on plotting type
-        self.colormap_container.setVisible(plotting_type == PlottingType.SCATTER.name)
-
-    def bin_auto_changed(self):
-        """Handle changes to the bin auto checkbox."""
-        # Enable/disable bin number spinner based on auto checkbox
-        self.bin_number.setEnabled(not self.bin_auto.isChecked())
-
-    def _update_point_highlighting(self):
-        """Update point highlighting based on current slice."""
-        if self.analysed_layer is None or not hasattr(self.canvas, 'scatter') or self.canvas.scatter is None:
-            return
-        
-        # Get the current frame
-        current_frame = self.frame
-        
-        # Get the layer data
-        features = self.get_layer_tabular_data(self.analysed_layer)
-        if features is None or len(features) == 0:
-            return
-        
-        # Check if we have a z or time dimension to use for highlighting
-        z_columns = [col for col in features.columns if col.lower() in ['z', 'depth', 'slice', 'frame', 'time', 't']]
-        if not z_columns:
-            return
-        
-        # Use the first matching column
-        z_column = z_columns[0]
-        if z_column not in features.columns:
-            return
-        
-        # Get z values
-        z_values = features[z_column].to_numpy()
-        
-        # Calculate weights based on distance from current frame
-        weights = points_in_current_slice(z_values, current_frame)
-        
-        # Create opacity values (1.0 for current slice, decreasing with distance)
-        opacities = weights
-        
-        # Create size values (larger for current slice, smaller with distance)
-        base_size = 10  # Base point size
-        self.sizes = base_size * (0.5 + 0.5 * weights)  # Scale between 50% and 100% of base size
-        
-        # Update colors with new opacities
-        colors = self.colors.copy()
-        if colors.shape[1] >= 4:  # If alpha channel exists
-            for i in range(len(colors)):
-                colors[i, 3] = opacities[i]
-        
-        # Update scatter plot
-        self.canvas.scatter.set_data(
-            pos=np.column_stack([self.data_x, self.data_y]),
-            face_color=colors,
-            size=self.sizes,
-            edge_width=0
-        )
-        
-        # If we have selected points, update their highlighting too
-        if hasattr(self.canvas, 'selected_mask') and self.canvas.selected_mask is not None:
-            mask = self.canvas.selected_mask
-            if np.any(mask):
-                highlight_colors = colors.copy()
-                # Apply yellow color to selected points while preserving opacity
-                for i in np.where(mask)[0]:
-                    highlight_colors[i, 0:3] = [1.0, 1.0, 0.0]  # Yellow
-                
-                self.canvas.scatter.set_data(
-                    pos=np.column_stack([self.data_x, self.data_y]),
-                    face_color=highlight_colors,
-                    size=self.sizes,
-                    edge_width=0
-                )
 
     def plot_clicked(self):
         """Handle the run button click."""
@@ -791,24 +687,56 @@ class VispyPlotterWidget(QWidget):
         # Set the axis labels
         self.canvas.set_labels(x_axis, y_axis)
         
-        # Get the plotting type
-        plot_type = self.plot_type.currentText()
+        # Get the selected color feature
+        color_feature = self.color_feature_combo.currentText()
         
-        # Check for clustering column
-        cluster_column = None
-        for col in features.columns:
-            if "CLUSTER" in col.upper() or "CLASS" in col.upper():
-                cluster_column = col
-                break
-        
-        # Get colors based on clustering
-        if cluster_column is not None:
-            cluster_ids = features[cluster_column].values
-            self.colors = get_cluster_colors(cluster_ids, self.colormap.currentText())
-            print(f"Using {cluster_column} for coloring points")
+        # Determine how to color the points
+        if color_feature == "Auto (Cluster)":
+            # Use the existing cluster detection logic
+            cluster_column = None
+            for col in features.columns:
+                if "CLUSTER" in col.upper() or "CLASS" in col.upper():
+                    cluster_column = col
+                    break
+            
+            # Get colors based on clustering
+            if cluster_column is not None:
+                cluster_ids = features[cluster_column].values
+                self.colors = get_cluster_colors(cluster_ids, self.colormap.currentText())
+                print(f"Using {cluster_column} for coloring points")
+            else:
+                # Default coloring
+                self.colors = np.ones((len(x_data), 4)) * np.array([0.5, 0.5, 1.0, 0.7])  # Light blue
         else:
-            # Default coloring
-            self.colors = np.ones((len(x_data), 4)) * np.array([0.5, 0.5, 1.0, 0.7])  # Light blue
+            # Use the selected feature for coloring
+            if color_feature in features.columns:
+                feature_values = features[color_feature].values
+                
+                # Normalize the values to [0, 1] range for coloring
+                if len(feature_values) > 0:
+                    min_val = np.min(feature_values)
+                    max_val = np.max(feature_values)
+                    
+                    # Avoid division by zero
+                    if max_val > min_val:
+                        normalized_values = (feature_values - min_val) / (max_val - min_val)
+                    else:
+                        normalized_values = np.zeros_like(feature_values)
+                    
+                    # Create a colormap
+                    import matplotlib.cm as cm
+                    cmap = cm.get_cmap(self.colormap.currentText())
+                    
+                    # Apply the colormap to get RGBA colors
+                    self.colors = cmap(normalized_values)
+                    print(f"Using {color_feature} for coloring points (min: {min_val}, max: {max_val})")
+                else:
+                    # Default coloring if no values
+                    self.colors = np.ones((len(x_data), 4)) * np.array([0.5, 0.5, 1.0, 0.7])  # Light blue
+            else:
+                # Default coloring if feature not found
+                self.colors = np.ones((len(x_data), 4)) * np.array([0.5, 0.5, 1.0, 0.7])  # Light blue
+                print(f"Feature {color_feature} not found, using default coloring")
         
         # Initialize sizes with default values
         self.sizes = np.ones(len(x_data)) * 10
@@ -845,21 +773,8 @@ class VispyPlotterWidget(QWidget):
         self.canvas.y_data = y_data
         self.canvas.original_colors = self.original_colors
         
-        # Create the plot based on the selected type
-        if plot_type == PlottingType.SCATTER.name:
-            self.canvas.make_scatter_plot(x_data, y_data, self.colors, self.sizes)
-        elif plot_type == PlottingType.HISTOGRAM.name:
-            # Get bin number
-            if self.bin_auto.isChecked():
-                bin_number = estimate_bin_number(x_data)
-            else:
-                bin_number = self.bin_number.value()
-            
-            # Check if we're making a 1D or 2D histogram
-            if x_axis == y_axis:
-                self.canvas.make_1d_histogram(x_data, bin_number=bin_number)
-            else:
-                self.canvas.make_2d_histogram(x_data, y_data, bin_number=bin_number)
+        # Create the scatter plot
+        self.canvas.make_scatter_plot(x_data, y_data, self.colors, self.sizes)
         
         # Update class visualization if we have class assignments
         if hasattr(self, 'class_assignments') and self.class_assignments is not None and len(self.class_assignments) > 0:
@@ -1238,6 +1153,9 @@ class VispyPlotterWidget(QWidget):
                     highlight_data = np.zeros_like(self.analysed_layer.data)
                     highlight_data[self.analysed_layer.data == label_value] = 1
                     
+                    # Store the original visibility state
+                    original_visible = self.analysed_layer.visible
+                    
                     # Check if highlight layer already exists
                     highlight_layer_name = f"{self.analysed_layer.name}_highlight"
                     if highlight_layer_name in self.viewer.layers:
@@ -1252,20 +1170,12 @@ class VispyPlotterWidget(QWidget):
                             opacity=0.7
                         )
                     
+                    # Make sure the original layer is still visible
+                    self.analysed_layer.visible = original_visible
+                    
                     # Update selection info
                     self.selection_info.setText(f"Label {label_value} selected from Vispy plotter")
                     
-                    # Set a timer to remove the highlight layer after 2 seconds
-                    if hasattr(self, 'highlight_reset_timer'):
-                        self.highlight_reset_timer.stop()
-                    else:
-                        self.highlight_reset_timer = QTimer()
-                        self.highlight_reset_timer.setSingleShot(True)
-                        self.highlight_reset_timer.timeout.connect(
-                            lambda: self._remove_highlight_layer(highlight_layer_name)
-                        )
-                    
-                    self.highlight_reset_timer.start(2000)  # 2 seconds
                 else:
                     # Handle the case when features_df is still None or doesn't have 'label' column
                     print(f"Cannot highlight label {napari_idx} - no features data available")
@@ -1274,6 +1184,9 @@ class VispyPlotterWidget(QWidget):
                     if self.analysed_layer.data is not None:
                         highlight_data = np.zeros_like(self.analysed_layer.data)
                         highlight_data[self.analysed_layer.data == napari_idx] = 1
+                        
+                        # Store the original visibility state
+                        original_visible = self.analysed_layer.visible
                         
                         # Check if highlight layer already exists
                         highlight_layer_name = f"{self.analysed_layer.name}_highlight"
@@ -1288,21 +1201,12 @@ class VispyPlotterWidget(QWidget):
                                 colormap={1: 'lime'},  # Bright green
                                 opacity=0.7
                             )
-                    
-                    # Update selection info
-                    self.selection_info.setText(f"Label {napari_idx} selected from Vispy plotter")
-                    
-                    # Set a timer to remove the highlight layer after 2 seconds
-                    if hasattr(self, 'highlight_reset_timer'):
-                        self.highlight_reset_timer.stop()
-                    else:
-                        self.highlight_reset_timer = QTimer()
-                        self.highlight_reset_timer.setSingleShot(True)
-                        self.highlight_reset_timer.timeout.connect(
-                            lambda: self._remove_highlight_layer(highlight_layer_name)
-                        )
-                    
-                    self.highlight_reset_timer.start(2000)  # 2 seconds
+                        
+                        # Make sure the original layer is still visible
+                        self.analysed_layer.visible = original_visible
+                        
+                        # Update selection info
+                        self.selection_info.setText(f"Label {napari_idx} selected from Vispy plotter")
 
     def _on_napari_mouse_click(self, viewer, event):
         """Handle mouse click events in napari.
@@ -1415,3 +1319,69 @@ class VispyPlotterWidget(QWidget):
                         
                         # Update selection info
                         self.selection_info.setText(f"Label {value} selected from napari viewer")
+
+    def _update_point_highlighting(self):
+        """Update point highlighting based on current slice."""
+        if self.analysed_layer is None or not hasattr(self.canvas, 'scatter') or self.canvas.scatter is None:
+            return
+        
+        # Get the current frame
+        current_frame = self.frame
+        
+        # Get the layer data
+        features = self.get_layer_tabular_data(self.analysed_layer)
+        if features is None or len(features) == 0:
+            return
+        
+        # Check if we have a z or time dimension to use for highlighting
+        z_columns = [col for col in features.columns if col.lower() in ['z', 'depth', 'slice', 'frame', 'time', 't']]
+        if not z_columns:
+            return
+        
+        # Use the first matching column
+        z_column = z_columns[0]
+        if z_column not in features.columns:
+            return
+        
+        # Get z values
+        z_values = features[z_column].to_numpy()
+        
+        # Calculate weights based on distance from current frame
+        weights = points_in_current_slice(z_values, current_frame)
+        
+        # Create opacity values (1.0 for current slice, decreasing with distance)
+        opacities = weights
+        
+        # Create size values (larger for current slice, smaller with distance)
+        base_size = 10  # Base point size
+        self.sizes = base_size * (0.5 + 0.5 * weights)  # Scale between 50% and 100% of base size
+        
+        # Update colors with new opacities
+        colors = self.colors.copy()
+        if colors.shape[1] >= 4:  # If alpha channel exists
+            for i in range(len(colors)):
+                colors[i, 3] = opacities[i]
+        
+        # Update scatter plot
+        self.canvas.scatter.set_data(
+            pos=np.column_stack([self.data_x, self.data_y]),
+            face_color=colors,
+            size=self.sizes,
+            edge_width=0
+        )
+        
+        # If we have selected points, update their highlighting too
+        if hasattr(self.canvas, 'selected_mask') and self.canvas.selected_mask is not None:
+            mask = self.canvas.selected_mask
+            if np.any(mask):
+                highlight_colors = colors.copy()
+                # Apply yellow color to selected points while preserving opacity
+                for i in np.where(mask)[0]:
+                    highlight_colors[i, 0:3] = [1.0, 1.0, 0.0]  # Yellow
+                
+                self.canvas.scatter.set_data(
+                    pos=np.column_stack([self.data_x, self.data_y]),
+                    face_color=highlight_colors,
+                    size=self.sizes,
+                    edge_width=0
+                )
