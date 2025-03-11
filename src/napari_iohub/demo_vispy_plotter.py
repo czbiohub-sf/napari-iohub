@@ -1,21 +1,20 @@
 """
-Demo for the high-performance Vispy plotter in napari-iohub.
+Demo for the high-performance Vispy plotter.
 
-This example creates synthetic data with UMAP and PCA dimensions, along with other
-features that can be visualized using the Vispy plotter widget. It demonstrates
-how to create points and labels layers with rich feature data for visualization.
+This example loads a 3D cell image and demonstrates the Vispy plotter's
+capabilities for visualizing and interacting with large datasets.
 """
 
 import numpy as np
-from skimage import data, feature, filters, morphology
-from skimage.measure import regionprops
 import pandas as pd
-from sklearn.decomposition import PCA
+from skimage import data, filters, measure, morphology
+from skimage.feature import peak_local_max
 from sklearn.preprocessing import StandardScaler
+from sklearn.decomposition import PCA
 import umap
-
 import napari
-from napari_iohub._vispy_plotter import vispy_plotter_widget
+
+from napari_iohub.vispy_plotter import vispy_plotter_widget
 
 
 def create_demo_data():
@@ -33,11 +32,11 @@ def create_demo_data():
     
     # Find maxima points
     print("Finding nuclei maxima...")
-    nuclei_points = feature.peak_local_max(nuclei_smoothed, min_distance=20)
+    nuclei_points = peak_local_max(nuclei_smoothed, min_distance=20)
     
     # Create features for the labels
     print("Creating features for visualization...")
-    props = regionprops(nuclei_labels)
+    props = measure.regionprops(nuclei_labels)
     
     # Extract basic features
     label_ids = [p.label for p in props]
