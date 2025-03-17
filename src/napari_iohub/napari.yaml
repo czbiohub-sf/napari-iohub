@@ -15,7 +15,7 @@ contributions:
       python_name: napari_iohub._view_tracks:open_image_and_tracks
       title: Single-cell features
     - id: napari-iohub.vispy_plot
-      python_name: napari_iohub._vispy_plotter:vispy_plotter_widget
+      python_name: napari_iohub.vispy_plotter:vispy_plotter_widget
       title: High-Performance Data Visualization
   readers:
     - command: napari-iohub.get_reader
