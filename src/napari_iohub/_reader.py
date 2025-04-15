@@ -119,7 +119,7 @@ def _get_multiscales(pos: Position):
     multiscales = []
     for im in images:
         try:
-            multiscales.append(da.from_zarr(pos[im]))
+            multiscales.append(pos[im].dask_array())
         except Exception as e:
             logging.warning(
                 f"Skipped array '{im}' at position {pos.zgroup.name}: {e}"
