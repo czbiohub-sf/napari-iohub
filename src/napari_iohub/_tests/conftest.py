@@ -11,7 +11,7 @@ def hcs_path(tmp_path_factory):
         ("A", "1", "42"),
         ("A", "1", "pos65535"),
         ("A", "1", "randomAlphanumericName000"),
-        ("H", 10, 0),
+        ("H", "10", "0"),
         ("Control", "Blank", "0"),
         ("Control", "Blank", "a"),
     )
