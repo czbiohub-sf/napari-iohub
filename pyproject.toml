@@ -6,7 +6,7 @@ build-backend = "setuptools.build_meta"
 name = "napari-iohub"
 description = "OME-Zarr viewer for napari with iohub as the I/O backend"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = ">=3.11"
 license = { file = "LICENSE" }
 authors = [
   { name = "CZ Biohub SF and napari-iohub contributors", email = "iohub@czbiohub.org" },
@@ -20,9 +20,9 @@ classifiers = [
   "License :: OSI Approved :: BSD License",
   "Programming Language :: Python :: 3",
   "Programming Language :: Python :: 3 :: Only",
-  "Programming Language :: Python :: 3.10",
   "Programming Language :: Python :: 3.11",
   "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
   "Topic :: Scientific/Engineering :: Image Processing",
 ]
 
@@ -31,7 +31,7 @@ clustering = [
   # https://github.com/BiAPoL/napari-clusters-plotter/pull/345
   "napari-clusters-plotter@git+https://github.com/BiAPoL/napari-clusters-plotter.git@43f5f8297f41927eb5993b95092aaf9f90bb1583",
   "ultrack",
-  "iohub==0.2.0a1",
+  "iohub>=0.2.0a1",
 ]
 all = ["napari[all]", "napari-iohub[clustering]"]
 dev = [
