@@ -1,11 +1,12 @@
 from __future__ import annotations
 
 import logging
-import os
+from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
 import dask.array as da
 import numpy as np
+import zarr
 from iohub.ngff.nodes import (
     MultiScaleMeta,
     NGFFNode,
@@ -13,7 +14,6 @@ from iohub.ngff.nodes import (
     Plate,
     Position,
     Well,
-    _open_store,
     open_ome_zarr,
 )
 from pydantic_extra_types.color import Color
@@ -41,11 +41,11 @@ def napari_get_reader(path):
         # if it is a list, it is assumed to be an image stack...
         # so we are only going to look at the first file.
         path = path[0]
-
+    path = Path(path)
     # if we know we cannot read the file, we immediately return None.
-    if not (os.path.isdir(path) and ".zarr" in path):
+    if not path.is_dir() and path.exists():
         return None
-    if not os.path.isfile(os.path.join(path, ".zattrs")):
+    if not ((path / ".zattrs").exists() or (path / "zarr.json").exists()):
         return None
     # otherwise we return the *function* that can read ``path``.
     return reader_function
@@ -53,10 +53,13 @@ def napari_get_reader(path):
 
 def _get_node(path: StrOrBytesPath):
     try:
-        zgroup = _open_store(path, mode="r", version="0.4")
+        zgroup = zarr.open_group(path, mode="r")
     except Exception as e:
         raise RuntimeError(e)
-    if "well" in zgroup.attrs:
+    attrs = zgroup.attrs
+    if "ome" in attrs:
+        attrs = attrs["ome"]
+    if "well" in attrs:
         first_pos_grp = next(zgroup.groups())[1]
         channel_names = Position(first_pos_grp).channel_names
         node = Well(
@@ -65,11 +68,13 @@ def _get_node(path: StrOrBytesPath):
             channel_names=channel_names,
             version="0.4",
         )
-    elif "plate" in zgroup.attrs:
+    elif "plate" in attrs or "multiscales" in attrs:
         zgroup.store.close()
-        node = open_ome_zarr(store_path=path, layout="hcs", mode="r")
+        node = open_ome_zarr(store_path=path, mode="r")
     else:
-        raise KeyError(f"NGFF plate or well metadata not found under '{zgroup.name}'")
+        raise KeyError(
+            f"NGFF plate or well metadata not found under '{zgroup.name}'"
+        )
     return node
 
 
@@ -114,9 +119,11 @@ def _get_multiscales(pos: Position):
     multiscales = []
     for im in images:
         try:
-            multiscales.append(da.from_zarr(pos[im]))
+            multiscales.append(pos[im].dask_array())
         except Exception as e:
-            logging.warning(f"Skipped array '{im}' at position {pos.zgroup.name}: {e}")
+            logging.warning(
+                f"Skipped array '{im}' at position {pos.zgroup.name}: {e}"
+            )
     return len(multiscales), multiscales
 
 
@@ -132,29 +139,40 @@ def _make_grid(elements: list[da.Array], cols: int):
     return grid
 
 
-def _ome_to_napari_by_channel(metadata, parse_colormap: bool = True):
+def _ome_to_napari_by_channel(
+    metadata, parse_colormap: bool = True, num_channels: int | None = None
+):
+    if metadata.omero is None:
+        if num_channels is None:
+            raise ValueError(
+                "num_channels must be set when omero is not present"
+            )
+        return [
+            {"name": f"{i}", "blending": "additive"}
+            for i in range(num_channels)
+        ]
     omero: OMEROMeta = metadata.omero
     layers_kwargs = []
     for channel in omero.channels:
-        metadata = {"name": channel.label}
+        meta = {"name": channel.label}
         if channel.color and parse_colormap:
             # alpha channel is optional
             rgb = Color(channel.color).as_rgb_tuple(alpha=None)
             start = [0.0] * 3
             if len(rgb) == 4:
                 start += [1]
-            metadata["colormap"] = np.array(
+            meta["colormap"] = np.array(
                 [
                     start,
                     [v / np.iinfo(np.uint8).max for v in rgb],
                 ]
             )
-            metadata["blending"] = "additive"
-        layers_kwargs.append(metadata)
+            meta["blending"] = "additive"
+        layers_kwargs.append(meta)
     return layers_kwargs
 
 
-def _find_ch_axis(dataset: NGFFNode):
+def _find_ch_axis(dataset: NGFFNode) -> int | None:
     for i, axis in enumerate(dataset.axes):
         if axis.type == "channel":
             return i
@@ -176,31 +194,40 @@ def layers_from_arrays(
             pre_idx = []
         else:
             pre_idx = [slice(None)] * ch_axis
-    else:
-        raise IndexError("Cannot index channel axis")
     layers = []
     for i, kwargs in enumerate(layers_kwargs):
-        slc = tuple(pre_idx + [slice(i, i + 1)])
-        data = [da.squeeze(arr[slc], axis=ch_axis) for arr in arrays]
+        if ch_axis is not None:
+            slc = tuple(pre_idx + [slice(i, i + 1)])
+            data = [da.squeeze(arr[slc], axis=ch_axis) for arr in arrays]
+        else:
+            if i > 0:
+                raise RuntimeError("mismatched number of channels")
+            data = [arr for arr in arrays]
         layer = (data, kwargs, layer_type)
         layers.append(layer)
     return layers
 
 
 def fov_to_layers(fov: Position, layer_type: str = "image"):
-    layers_kwargs = _ome_to_napari_by_channel(
-        fov.metadata, parse_colormap=(layer_type == "image")
-    )
     ch_axis = _find_ch_axis(fov)
-    arrays = [arr for _, arr in fov.images()]
+    arrays = [arr.dask_array() for _, arr in fov.images()]
+    layers_kwargs = _ome_to_napari_by_channel(
+        fov.metadata,
+        parse_colormap=(layer_type == "image"),
+        num_channels=arrays[0].shape[ch_axis] if ch_axis is not None else 1,
+    )
     return layers_from_arrays(
         layers_kwargs, ch_axis, arrays, mode="stitch", layer_type=layer_type
     )
 
 
-def well_to_layers(well: Well, mode: Literal["stitch", "stack"], layer_type: str):
+def well_to_layers(
+    well: Well, mode: Literal["stitch", "stack"], layer_type: str
+):
     if mode == "stitch":
-        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(well, row_wrap=4)
+        layers_kwargs, ch_axis, arrays = stitch_well_by_channel(
+            well, row_wrap=4
+        )
     elif mode == "stack":
         layers_kwargs, ch_axis, arrays = stack_well_by_position(well)
     return layers_from_arrays(
@@ -231,7 +258,9 @@ def make_bbox(bbox_extents):
     maxr = bbox_extents[2]
     maxc = bbox_extents[3]
 
-    bbox_rect = np.array([[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]])
+    bbox_rect = np.array(
+        [[minr, minc], [maxr, minc], [maxr, maxc], [minr, maxc]]
+    )
     bbox_rect = np.moveaxis(bbox_rect, 2, 0)
 
     return bbox_rect
@@ -271,7 +300,9 @@ def plate_to_layers(
                 ]
                 for k in range(len(boxes)):
                     boxes[k].append(box_extents[k] - 0.5)
-                properties["fov"].append(well_path + "/" + next(well.positions())[0])
+                properties["fov"].append(
+                    well_path + "/" + next(well.positions())[0]
+                )
             else:
                 row_arrays.append(None)
         plate_arrays.append(row_arrays)
@@ -284,7 +315,9 @@ def plate_to_layers(
             row_level = []
             for c in r:
                 if c is None:
-                    arr = da.zeros(shape=fill_args[level][0], dtype=fill_args[level][1])
+                    arr = da.zeros(
+                        shape=fill_args[level][0], dtype=fill_args[level][1]
+                    )
                 else:
                     arr = c[level]
                 row_level.append(arr)
@@ -298,7 +331,7 @@ def plate_to_layers(
         layer_type="image",
     )
     layers.append(
-        [
+        (
             make_bbox(boxes),
             {
                 "face_color": "transparent",
@@ -308,7 +341,7 @@ def plate_to_layers(
                 "name": "Plate Map",
             },
             "shapes",
-        ]
+        )
     )
     return layers
 
@@ -336,7 +369,10 @@ def reader_function(path):
         default to layer_type=="image" if not provided
     """
     node = _get_node(path)
-    if isinstance(node, Well):
-        return well_to_layers(node, mode="stitch", layer_type="image")
-    else:
-        return plate_to_layers(node)
+    match node:
+        case Plate():
+            return plate_to_layers(node)
+        case Well():
+            return well_to_layers(node, mode="stitch", layer_type="image")
+        case Position():
+            return fov_to_layers(node)
