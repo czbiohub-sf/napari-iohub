@@ -1,6 +1,5 @@
 import os
 
-import pytest
 from iohub import open_ome_zarr
 from numpy.testing import assert_equal
 
