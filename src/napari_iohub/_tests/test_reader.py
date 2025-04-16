@@ -28,11 +28,9 @@ def test_reader_plate(hcs_path):
     reader = napari_get_reader(hcs_path)
     assert callable(reader)
     layer_data_list = reader(hcs_path)
-    assert isinstance(layer_data_list, list) and len(layer_data_list) == 3
+    assert isinstance(layer_data_list, list) and len(layer_data_list) == 4
     layer_data_tuple = layer_data_list[0]
-    assert (
-        isinstance(layer_data_tuple, tuple) and len(layer_data_tuple) == 3 + 1
-    )
+    assert isinstance(layer_data_tuple, tuple) and len(layer_data_tuple) == 3
     assert isinstance(layer_data_tuple[1], dict)
 
 
