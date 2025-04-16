@@ -41,10 +41,3 @@ def test_get_reader_pass():
     assert reader is None
     reader = napari_get_reader("/tmp/")
     assert reader is None
-
-
-def test_get_reader_v3():
-    path = "/Users/ziwen.liu/Projects/test-iohub/output_v3_compressed.zarr"
-    reader = napari_get_reader(path)
-    assert reader is not None
-    assert reader(path)
