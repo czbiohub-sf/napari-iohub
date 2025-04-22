@@ -11,7 +11,7 @@ license = { file = "LICENSE" }
 authors = [
   { name = "CZ Biohub SF and napari-iohub contributors", email = "iohub@czbiohub.org" },
 ]
-dependencies = ["iohub>=0.1.0", "magicgui", "qtpy"]
+dependencies = ["iohub>=0.1.0", "magicgui", "qtpy", "vispy"]
 dynamic = ["version"]
 classifiers = [
   "Development Status :: 2 - Pre-Alpha",
