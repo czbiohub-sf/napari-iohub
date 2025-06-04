@@ -153,7 +153,8 @@ def open_image_and_tracks(
     image_z = image_fov["0"].slices
     if expand_z_for_tracking_labels:
         _logger.info(f"Expanding tracks to Z={image_z}")
-        labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
+        labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1).compute()
+        # labels_layer[0][0].compute_chunk_sizes()
     if features_dataset is not None:
         _logger.info(f"Loading features from {str(features_dataset)}")
         labels_layer[1]["features"] = _load_features(
