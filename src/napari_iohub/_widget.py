@@ -208,10 +208,11 @@ class MainWidget(QWidget):
             # constructing layer directly cause cryptic color map errors
             add_method = getattr(self.viewer, "add_" + layer_data[2].lower())
             add_method(layer_data[0], **layer_data[1])
-        axis_labels = [
-            ax.name for ax in self.dataset.axes if ax.type != "channel"
-        ]
-        if len(self.viewer.dims.axis_labels) == len(axis_labels) + 1:
+        axis_labels = self.viewer.layers[0].axis_labels
+        if (
+            len(self.viewer.dims.axis_labels)
+            == len(self.viewer.layers[0].data.shape) + 1
+        ):
             axis_labels = ["P"] + axis_labels
         elif not len(self.viewer.dims.axis_labels) == len(axis_labels):
             return

@@ -140,8 +140,13 @@ def _make_grid(elements: list[da.Array], cols: int):
 
 
 def _ome_to_napari_by_channel(
-    metadata, parse_colormap: bool = True, num_channels: int | None = None
+    metadata: MultiScaleMeta,
+    parse_colormap: bool = True,
+    num_channels: int | None = None,
 ):
+    axes = metadata.multiscales[0].axes
+    axis_labels = [ax.name for ax in axes if ax.type != "channel"]
+    units = [ax.unit for ax in axes if ax.type != "channel"]
     if metadata.omero is None:
         if num_channels is None:
             raise ValueError(
@@ -154,7 +159,11 @@ def _ome_to_napari_by_channel(
     omero: OMEROMeta = metadata.omero
     layers_kwargs = []
     for channel in omero.channels:
-        meta = {"name": channel.label}
+        meta = {
+            "name": channel.label,
+            "axis_labels": axis_labels,
+            "units": units,
+        }
         if channel.color and parse_colormap:
             # alpha channel is optional
             rgb = Color(channel.color).as_rgb_tuple(alpha=None)
