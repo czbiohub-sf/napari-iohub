@@ -309,14 +309,16 @@ def plate_to_layers(
     first_blocks = next(a for a in plate_arrays[0] if a is not None)
     fill_args = [(b.shape, b.dtype) for b in first_blocks]
     plate_levels = []
-    for level, _ in enumerate(first_blocks):
+    for level, first_block in enumerate(first_blocks):
         plate_level = []
         for r in plate_arrays:
             row_level = []
             for c in r:
                 if c is None:
                     arr = da.zeros(
-                        shape=fill_args[level][0], dtype=fill_args[level][1]
+                        shape=fill_args[level][0],
+                        dtype=fill_args[level][1],
+                        chunks=first_block.chunksize,
                     )
                 else:
                     arr = c[level]
