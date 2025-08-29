@@ -5,12 +5,14 @@ from ._edit_labels import EditLabelsWidget
 from ._reader import napari_get_reader
 from ._view_tracks import open_image_and_tracks
 from ._widget import MainWidget
+from .vispy_plotter._widget import vispy_plotter_widget
 
 __all__ = (
     "napari_get_reader",
     "MainWidget",
     "EditLabelsWidget",
     "open_image_and_tracks",
+    "vispy_plotter_widget",
 )
 
 _logger = logging.getLogger(__name__)
