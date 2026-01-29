@@ -1,6 +1,7 @@
 import logging
 import os
 
+from ._cell_state_annotator import CellStateAnnotatorWidget
 from ._edit_labels import EditLabelsWidget
 from ._reader import napari_get_reader
 from ._view_tracks import open_image_and_tracks
@@ -11,6 +12,7 @@ __all__ = (
     "MainWidget",
     "EditLabelsWidget",
     "open_image_and_tracks",
+    "CellStateAnnotatorWidget",
 )
 
 _logger = logging.getLogger(__name__)
