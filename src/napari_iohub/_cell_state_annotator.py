@@ -9,6 +9,7 @@ Ported from VisCy PR #349: https://github.com/mehta-lab/VisCy/pull/349
 
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import shutil
@@ -72,7 +73,9 @@ class CellStateAnnotatorWidget(QWidget):
         self.viewer = napari_viewer
         self._tracks_fov = None
         self._tracks_csv_path: Path | None = None
-        self._resume_csv_path: Path | None = None  # Optional CSV for resuming annotations
+        self._resume_csv_path: Path | None = (
+            None  # Optional CSV for resuming annotations
+        )
         self._fov_name: str = ""
         self._output_path: Path = Path.cwd()
 
@@ -96,9 +99,7 @@ class CellStateAnnotatorWidget(QWidget):
         layout.addWidget(title)
 
         # Instructions
-        instructions = QLabel(
-            "Shortcuts: a/d=time, q/e=layers, r=interpolate, s=save"
-        )
+        instructions = QLabel("Shortcuts: a/d=time, q/e=layers, r=interpolate, s=save")
         instructions.setWordWrap(True)
         layout.addWidget(instructions)
 
@@ -248,9 +249,7 @@ class CellStateAnnotatorWidget(QWidget):
             self._row_cb.clear()
             self._well_cb.clear()
             self._fov_cb.clear()
-            self._row_names = [
-                row.name for row in self._tracks_dataset.metadata.rows
-            ]
+            self._row_names = [row.name for row in self._tracks_dataset.metadata.rows]
             self._col_names = [
                 col.name for col in self._tracks_dataset.metadata.columns
             ]
@@ -346,9 +345,7 @@ class CellStateAnnotatorWidget(QWidget):
             tracks_z_index = image_z // 2
 
             # Load tracks CSV from OME-Zarr directory
-            tracks_dir = (
-                Path(self._tracks_path_le.text()) / self._fov_name.strip("/")
-            )
+            tracks_dir = Path(self._tracks_path_le.text()) / self._fov_name.strip("/")
             self._tracks_csv_path = next(tracks_dir.glob("*.csv"))
             _logger.info(f"Loading tracks from {self._tracks_csv_path}")
             tracks_layer = _ultrack_read_csv(self._tracks_csv_path)
@@ -366,7 +363,9 @@ class CellStateAnnotatorWidget(QWidget):
 
             # Load existing annotations from resume CSV if provided, otherwise from tracks CSV
             if self._resume_csv_path is not None:
-                _logger.info(f"Loading annotations from resume CSV: {self._resume_csv_path}")
+                _logger.info(
+                    f"Loading annotations from resume CSV: {self._resume_csv_path}"
+                )
                 annotation_df = pd.read_csv(self._resume_csv_path)
             else:
                 annotation_df = pd.read_csv(self._tracks_csv_path)
@@ -579,7 +578,11 @@ class CellStateAnnotatorWidget(QWidget):
             tracks_df = pd.read_csv(self._tracks_csv_path)
 
             # Annotation metadata
-            annotator = os.getlogin()
+            try:
+                annotator = os.getlogin()
+            except OSError:
+                # Fallback for VMs/containers where getlogin() fails
+                annotator = getpass.getuser()
             annotation_date = datetime.now().isoformat()
 
             # Determine version: increment if re-saving from resume CSV, otherwise start at 1.0
@@ -772,7 +775,9 @@ class CellStateAnnotatorWidget(QWidget):
 
             merged_df.to_csv(output_csv, index=False)
 
-            self._status_label.setText(f"Saved to {output_csv.name} (v{annotation_version})")
+            self._status_label.setText(
+                f"Saved to {output_csv.name} (v{annotation_version})"
+            )
             _logger.info(f"Saved annotations to {output_csv}")
 
         except Exception as e:
