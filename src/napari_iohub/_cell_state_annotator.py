@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import os
+import shutil
 from datetime import datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -71,7 +72,7 @@ class CellStateAnnotatorWidget(QWidget):
         self.viewer = napari_viewer
         self._tracks_fov = None
         self._tracks_csv_path: Path | None = None
-        self._direct_csv_load: bool = False  # True if CSV was loaded directly
+        self._resume_csv_path: Path | None = None  # Optional CSV for resuming annotations
         self._fov_name: str = ""
         self._output_path: Path = Path.cwd()
 
@@ -115,10 +116,18 @@ class CellStateAnnotatorWidget(QWidget):
         # Tracks dataset browser
         tracks_btn = QPushButton("Browse tracks")
         tracks_btn.clicked.connect(self._browse_tracks)
-        tracks_btn.setToolTip("Select CSV file, or type path for OME-Zarr directory")
+        tracks_btn.setToolTip("Select OME-Zarr directory with segmentation labels")
         self._tracks_path_le = QLineEdit()
         self._tracks_path_le.editingFinished.connect(self._on_tracks_path_changed)
         form.addRow(tracks_btn, self._tracks_path_le)
+
+        # Resume CSV browser (optional)
+        resume_btn = QPushButton("Resume CSV")
+        resume_btn.clicked.connect(self._browse_resume_csv)
+        resume_btn.setToolTip("Optional: select existing CSV to resume annotations")
+        self._resume_csv_path_le = QLineEdit()
+        self._resume_csv_path_le.editingFinished.connect(self._on_resume_csv_changed)
+        form.addRow(resume_btn, self._resume_csv_path_le)
 
         # FOV navigation
         self._row_cb = _add_nav_combobox(
@@ -176,17 +185,44 @@ class CellStateAnnotatorWidget(QWidget):
         self._on_images_path_changed()
 
     def _browse_tracks(self) -> None:
-        """Browse for tracks CSV file. For OME-Zarr directories, type the path."""
-        path, _ = QFileDialog.getOpenFileName(
-            parent=self,
-            caption="Select tracks CSV (or type path for OME-Zarr)",
-            directory=os.getcwd(),
-            filter="CSV files (*.csv);;All files (*)",
-        )
+        """Browse for tracks OME-Zarr directory."""
+        path = _choose_dir(self)
         if not path:
             return
         self._tracks_path_le.setText(path)
         self._on_tracks_path_changed()
+
+    def _browse_resume_csv(self) -> None:
+        """Browse for an existing CSV file to resume annotations."""
+        path, _ = QFileDialog.getOpenFileName(
+            parent=self,
+            caption="Select CSV to resume annotations",
+            directory=os.getcwd(),
+            filter="CSV files (*.csv)",
+        )
+        if not path:
+            return
+        self._resume_csv_path_le.setText(path)
+        self._on_resume_csv_changed()
+
+    def _on_resume_csv_changed(self) -> None:
+        """Handle path entry for resume CSV."""
+        path = self._resume_csv_path_le.text()
+        if not path:
+            self._resume_csv_path = None
+            return
+
+        path_obj = Path(path)
+        if path_obj.suffix.lower() != ".csv":
+            self._status_label.setText("Error: Resume path must be a CSV file")
+            return
+
+        if not path_obj.exists():
+            self._status_label.setText(f"Error: CSV not found: {path_obj.name}")
+            return
+
+        self._resume_csv_path = path_obj
+        self._status_label.setText(f"Resume CSV: {path_obj.name}")
 
     def _on_images_path_changed(self) -> None:
         """Handle path entry for images dataset."""
@@ -200,44 +236,29 @@ class CellStateAnnotatorWidget(QWidget):
             self._status_label.setText(f"Error opening images: {e}")
 
     def _on_tracks_path_changed(self) -> None:
-        """Handle path entry for tracks dataset (CSV or OME-Zarr directory)."""
+        """Handle path entry for tracks OME-Zarr directory."""
         path = self._tracks_path_le.text()
         if not path:
             return
 
-        path_obj = Path(path)
-
-        if path_obj.suffix.lower() == ".csv":
-            # CSV file selected - store path directly
-            self._tracks_csv_path = path_obj
-            self._direct_csv_load = True
-            self._tracks_dataset = None
-            # Clear FOV navigation (not needed for direct CSV)
+        try:
+            self._tracks_dataset = open_ome_zarr(path)
+            self._tracks_csv_path = None
+            # Populate row combobox
             self._row_cb.clear()
             self._well_cb.clear()
             self._fov_cb.clear()
-            self._status_label.setText(f"Tracks CSV: {path_obj.name}")
-        else:
-            # Assume OME-Zarr directory
-            try:
-                self._tracks_dataset = open_ome_zarr(path)
-                self._tracks_csv_path = None
-                self._direct_csv_load = False
-                # Populate row combobox
-                self._row_cb.clear()
-                self._well_cb.clear()
-                self._fov_cb.clear()
-                self._row_names = [
-                    row.name for row in self._tracks_dataset.metadata.rows
-                ]
-                self._col_names = [
-                    col.name for col in self._tracks_dataset.metadata.columns
-                ]
-                self._plate_wells = self._tracks_dataset.metadata.wells
-                self._row_cb.addItems(self._row_names)
-                self._status_label.setText(f"Tracks: {Path(path).name}")
-            except Exception as e:
-                self._status_label.setText(f"Error opening tracks: {e}")
+            self._row_names = [
+                row.name for row in self._tracks_dataset.metadata.rows
+            ]
+            self._col_names = [
+                col.name for col in self._tracks_dataset.metadata.columns
+            ]
+            self._plate_wells = self._tracks_dataset.metadata.wells
+            self._row_cb.addItems(self._row_names)
+            self._status_label.setText(f"Tracks: {Path(path).name}")
+        except Exception as e:
+            self._status_label.setText(f"Error opening tracks: {e}")
 
     def _load_row(self, row_name: str) -> None:
         """Load wells for selected row."""
@@ -287,33 +308,17 @@ class CellStateAnnotatorWidget(QWidget):
             self._status_label.setText("Error: Select images dataset first")
             return
 
-        # Check if we have a direct CSV or need OME-Zarr tracks
-        has_direct_csv = self._tracks_csv_path is not None
         has_tracks_dataset = (
             hasattr(self, "_tracks_dataset") and self._tracks_dataset is not None
         )
 
-        if not has_direct_csv and not has_tracks_dataset:
-            self._status_label.setText("Error: Select tracks (CSV or OME-Zarr)")
+        if not has_tracks_dataset:
+            self._status_label.setText("Error: Select tracks OME-Zarr directory")
             return
 
-        if not has_direct_csv and not self._fov_name:
+        if not self._fov_name:
             self._status_label.setText("Error: Select a FOV first")
             return
-
-        # Determine FOV name from CSV if loaded directly
-        if has_direct_csv and not self._fov_name:
-            # Try to get FOV name from CSV
-            try:
-                df = pd.read_csv(self._tracks_csv_path, nrows=1)
-                if "fov_name" in df.columns:
-                    self._fov_name = df["fov_name"].iloc[0]
-                else:
-                    self._status_label.setText("Error: CSV missing fov_name column")
-                    return
-            except Exception as e:
-                self._status_label.setText(f"Error reading CSV: {e}")
-                return
 
         self._status_label.setText(f"Loading {self._fov_name}...")
 
@@ -323,35 +328,30 @@ class CellStateAnnotatorWidget(QWidget):
             image_fov = self._images_dataset[self._fov_name]
             image_layers = fov_to_layers(image_fov)
 
-            # Load tracking labels if we have a tracks dataset
-            if has_tracks_dataset:
-                _logger.info(f"Loading tracking labels for {self._fov_name}")
-                self._tracks_fov = self._tracks_dataset[self._fov_name]
-                labels_layer = fov_to_layers(self._tracks_fov, layer_type="labels")[0]
-                # Fix dtype for napari issue #7327
-                labels_layer[0][0] = labels_layer[0][0].astype("uint32")
+            # Load tracking labels from OME-Zarr
+            _logger.info(f"Loading tracking labels for {self._fov_name}")
+            self._tracks_fov = self._tracks_dataset[self._fov_name]
+            labels_layer = fov_to_layers(self._tracks_fov, layer_type="labels")[0]
+            # Fix dtype for napari issue #7327
+            labels_layer[0][0] = labels_layer[0][0].astype("uint32")
 
-                # Expand Z if needed
-                image_z = image_fov["0"].slices
-                _logger.info(f"Expanding tracks to Z={image_z}")
-                labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
+            # Expand Z if needed
+            image_z = image_fov["0"].slices
+            _logger.info(f"Expanding tracks to Z={image_z}")
+            labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
 
-                image_layers.append(labels_layer)
-            else:
-                self._tracks_fov = None
+            image_layers.append(labels_layer)
 
             # Get image Z for track positioning
-            image_z = image_fov["0"].slices
+            tracks_z_index = image_z // 2
 
-            # Load tracks CSV (use direct path or find in tracks directory)
-            if not has_direct_csv:
-                tracks_dir = (
-                    Path(self._tracks_path_le.text()) / self._fov_name.strip("/")
-                )
-                self._tracks_csv_path = next(tracks_dir.glob("*.csv"))
+            # Load tracks CSV from OME-Zarr directory
+            tracks_dir = (
+                Path(self._tracks_path_le.text()) / self._fov_name.strip("/")
+            )
+            self._tracks_csv_path = next(tracks_dir.glob("*.csv"))
             _logger.info(f"Loading tracks from {self._tracks_csv_path}")
             tracks_layer = _ultrack_read_csv(self._tracks_csv_path)
-            tracks_z_index = image_z // 2
             tracks_layer[0].insert(loc=2, column="z", value=tracks_z_index)
             image_layers.append(tracks_layer)
 
@@ -364,16 +364,23 @@ class CellStateAnnotatorWidget(QWidget):
             # Set up annotation layers
             self._setup_annotation_layers()
 
-            # Load existing annotations from CSV if present
-            tracks_df = pd.read_csv(self._tracks_csv_path)
-            self._load_annotations_from_csv(tracks_df, tracks_z_index)
+            # Load existing annotations from resume CSV if provided, otherwise from tracks CSV
+            if self._resume_csv_path is not None:
+                _logger.info(f"Loading annotations from resume CSV: {self._resume_csv_path}")
+                annotation_df = pd.read_csv(self._resume_csv_path)
+            else:
+                annotation_df = pd.read_csv(self._tracks_csv_path)
+            self._load_annotations_from_csv(annotation_df, tracks_z_index)
 
             # Bind keybindings (only once)
             if not self._keybindings_bound:
                 self._bind_keybindings()
                 self._keybindings_bound = True
 
-            self._status_label.setText(f"Loaded {self._fov_name}")
+            status_msg = f"Loaded {self._fov_name}"
+            if self._resume_csv_path:
+                status_msg += f" (resuming from {self._resume_csv_path.name})"
+            self._status_label.setText(status_msg)
             _logger.info(f"Successfully loaded {len(self.viewer.layers)} layers")
 
         except Exception as e:
@@ -526,6 +533,41 @@ class CellStateAnnotatorWidget(QWidget):
         def save_shortcut(viewer: Viewer) -> None:
             self._save_annotations()
 
+    def _backup_csv(self, output_path: Path) -> None:
+        """Create a timestamped backup of the CSV file.
+
+        Parameters
+        ----------
+        output_path : Path
+            Path to the CSV file to backup.
+
+        Backups are stored in a 'backup' folder relative to the CSV location.
+        Only the latest 5 backups per unique base filename are kept.
+        """
+        if not output_path.exists():
+            return
+
+        backup_dir = output_path.parent / "backup"
+        backup_dir.mkdir(exist_ok=True)
+
+        timestamp = datetime.now().strftime("%Y-%m-%d_%H%M%S")
+        backup_name = f"{output_path.stem}_{timestamp}.csv"
+        backup_path = backup_dir / backup_name
+
+        shutil.copy2(output_path, backup_path)
+        _logger.info(f"Created backup: {backup_path}")
+
+        # Keep only latest 5 backups for this base filename
+        base_stem = output_path.stem
+        all_backups = sorted(
+            backup_dir.glob(f"{base_stem}_*.csv"),
+            key=lambda p: p.stat().st_mtime,
+            reverse=True,
+        )
+        for old_backup in all_backups[5:]:
+            old_backup.unlink()
+            _logger.info(f"Removed old backup: {old_backup}")
+
     def _save_annotations(self) -> None:
         """Save annotations to ultrack-compatible CSV."""
         if self._tracks_csv_path is None or self._tracks_fov is None:
@@ -540,17 +582,17 @@ class CellStateAnnotatorWidget(QWidget):
             annotator = os.getlogin()
             annotation_date = datetime.now().isoformat()
 
-            # Determine version: increment if re-saving, otherwise start at 1.0
-            if (
-                self._direct_csv_load
-                and "annotation_version" in tracks_df.columns
-            ):
-                # Increment existing version
-                old_version = tracks_df["annotation_version"].iloc[0]
-                try:
-                    major, minor = str(old_version).split(".")
-                    annotation_version = f"{int(major) + 1}.0"
-                except (ValueError, AttributeError):
+            # Determine version: increment if re-saving from resume CSV, otherwise start at 1.0
+            if self._resume_csv_path is not None:
+                resume_df = pd.read_csv(self._resume_csv_path)
+                if "annotation_version" in resume_df.columns:
+                    old_version = resume_df["annotation_version"].iloc[0]
+                    try:
+                        major, minor = str(old_version).split(".")
+                        annotation_version = f"{int(major) + 1}.0"
+                    except (ValueError, AttributeError):
+                        annotation_version = "2.0"
+                else:
                     annotation_version = "2.0"
             else:
                 annotation_version = "1.0"
@@ -715,15 +757,18 @@ class CellStateAnnotatorWidget(QWidget):
             merged_df = merged_df[column_order]
 
             # Determine output path
-            if self._direct_csv_load:
-                # Save back to the source CSV
-                output_csv = self._tracks_csv_path
+            if self._resume_csv_path is not None:
+                # Save back to the resume CSV
+                output_csv = self._resume_csv_path
             else:
                 # Generate new filename from plate/row/well/fov
                 plate_name = Path(self._tracks_path_le.text()).stem
                 row, well, fov = self._fov_name.split("/")
                 base_name = f"{plate_name}_{row}_{well}_{fov}"
                 output_csv = self._output_path / f"{base_name}.csv"
+
+            # Create backup before overwriting
+            self._backup_csv(output_csv)
 
             merged_df.to_csv(output_csv, index=False)
 
