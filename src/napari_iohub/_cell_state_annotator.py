@@ -71,6 +71,7 @@ class CellStateAnnotatorWidget(QWidget):
         self.viewer = napari_viewer
         self._tracks_fov = None
         self._tracks_csv_path: Path | None = None
+        self._direct_csv_load: bool = False  # True if CSV was loaded directly
         self._fov_name: str = ""
         self._output_path: Path = Path.cwd()
 
@@ -209,6 +210,7 @@ class CellStateAnnotatorWidget(QWidget):
         if path_obj.suffix.lower() == ".csv":
             # CSV file selected - store path directly
             self._tracks_csv_path = path_obj
+            self._direct_csv_load = True
             self._tracks_dataset = None
             # Clear FOV navigation (not needed for direct CSV)
             self._row_cb.clear()
@@ -220,6 +222,7 @@ class CellStateAnnotatorWidget(QWidget):
             try:
                 self._tracks_dataset = open_ome_zarr(path)
                 self._tracks_csv_path = None
+                self._direct_csv_load = False
                 # Populate row combobox
                 self._row_cb.clear()
                 self._well_cb.clear()
@@ -536,7 +539,21 @@ class CellStateAnnotatorWidget(QWidget):
             # Annotation metadata
             annotator = os.getlogin()
             annotation_date = datetime.now().isoformat()
-            annotation_version = "1.0"
+
+            # Determine version: increment if re-saving, otherwise start at 1.0
+            if (
+                self._direct_csv_load
+                and "annotation_version" in tracks_df.columns
+            ):
+                # Increment existing version
+                old_version = tracks_df["annotation_version"].iloc[0]
+                try:
+                    major, minor = str(old_version).split(".")
+                    annotation_version = f"{int(major) + 1}.0"
+                except (ValueError, AttributeError):
+                    annotation_version = "2.0"
+            else:
+                annotation_version = "1.0"
 
             # Collect marked events from each layer
             marked_events: dict[str, list[dict]] = {
@@ -697,15 +714,20 @@ class CellStateAnnotatorWidget(QWidget):
             column_order = index_cols + annotation_cols + metadata_cols
             merged_df = merged_df[column_order]
 
-            # Save file
-            plate_name = Path(self._tracks_path_le.text()).stem
-            row, well, fov = self._fov_name.split("/")
-            base_name = f"{plate_name}_{row}_{well}_{fov}"
-            output_csv = self._output_path / f"{base_name}.csv"
+            # Determine output path
+            if self._direct_csv_load:
+                # Save back to the source CSV
+                output_csv = self._tracks_csv_path
+            else:
+                # Generate new filename from plate/row/well/fov
+                plate_name = Path(self._tracks_path_le.text()).stem
+                row, well, fov = self._fov_name.split("/")
+                base_name = f"{plate_name}_{row}_{well}_{fov}"
+                output_csv = self._output_path / f"{base_name}.csv"
 
             merged_df.to_csv(output_csv, index=False)
 
-            self._status_label.setText(f"Saved to {output_csv.name}")
+            self._status_label.setText(f"Saved to {output_csv.name} (v{annotation_version})")
             _logger.info(f"Saved annotations to {output_csv}")
 
         except Exception as e:
