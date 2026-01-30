@@ -14,6 +14,9 @@ contributions:
     - id: napari-iohub.view_tracks
       python_name: napari_iohub._view_tracks:open_image_and_tracks
       title: Single-cell features
+    - id: napari-iohub.cell_state_annotator
+      python_name: napari_iohub._cell_state_annotator:CellStateAnnotatorWidget
+      title: Cell state annotation
   readers:
     - command: napari-iohub.get_reader
       accepts_directories: true
@@ -25,3 +28,5 @@ contributions:
       display_name: Edit labels
     - command: napari-iohub.view_tracks
       display_name: Single-cell features
+    - command: napari-iohub.cell_state_annotator
+      display_name: Cell state annotation
