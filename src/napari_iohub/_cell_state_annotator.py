@@ -9,6 +9,7 @@ Ported from VisCy PR #349: https://github.com/mehta-lab/VisCy/pull/349
 
 from __future__ import annotations
 
+import getpass
 import logging
 import os
 import shutil
@@ -579,7 +580,11 @@ class CellStateAnnotatorWidget(QWidget):
             tracks_df = pd.read_csv(self._tracks_csv_path)
 
             # Annotation metadata
-            annotator = os.getlogin()
+            try:
+                annotator = os.getlogin()
+            except OSError:
+                # Fallback for VMs/containers where getlogin() fails
+                annotator = getpass.getuser()
             annotation_date = datetime.now().isoformat()
 
             # Determine version: increment if re-saving from resume CSV, otherwise start at 1.0
