@@ -5,7 +5,7 @@ import pytest
 
 from napari_iohub._cell_state_annotator import (
     ANNOTATION_LAYERS,
-    INDEX_COLUMNS,
+    ULTRACK_INDEX_COLUMNS,
     CellStateAnnotatorWidget,
 )
 
@@ -30,8 +30,8 @@ def test_annotation_layers_constant():
 
 def test_index_columns_constant():
     """Test that index columns match ultrack expectations."""
-    expected = ["fov_name", "track_id", "t", "z", "y", "x"]
-    assert INDEX_COLUMNS == expected
+    expected = ["fov_name", "track_id", "t", "id", "parent_track_id", "parent_id", "z", "y", "x"]
+    assert ULTRACK_INDEX_COLUMNS == expected
 
 
 def test_state_expansion_logic():
