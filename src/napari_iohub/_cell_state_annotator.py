@@ -41,7 +41,17 @@ if TYPE_CHECKING:
 _logger = logging.getLogger(__name__)
 
 # Index columns for ultrack-compatible CSV output
-INDEX_COLUMNS = ["fov_name", "track_id", "t", "z", "y", "x"]
+ULTRACK_INDEX_COLUMNS = [
+    "fov_name",
+    "track_id",
+    "t",
+    "id",
+    "parent_track_id",
+    "parent_id",
+    "z",
+    "y",
+    "x",
+]
 
 # Annotation layer definitions
 ANNOTATION_LAYERS = [
@@ -748,7 +758,9 @@ class CellStateAnnotatorWidget(QWidget):
             )
 
             # Reorder columns
-            index_cols = [col for col in INDEX_COLUMNS if col in merged_df.columns]
+            index_cols = [
+                col for col in ULTRACK_INDEX_COLUMNS if col in merged_df.columns
+            ]
             annotation_cols = [
                 "cell_division_state",
                 "infection_state",
