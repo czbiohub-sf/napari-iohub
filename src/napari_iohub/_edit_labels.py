@@ -6,6 +6,7 @@ import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import dask.array as da
 import numpy as np
 from iohub.ngff.nodes import Plate, Position, Row, Well, open_ome_zarr
 from napari import Viewer
@@ -140,13 +141,21 @@ class _LoadFOV(QWidget):
                         f"Casting labels data to uint16. Original type was {data.dtype}"
                     )
                     data = data.astype("uint16", casting="unsafe")
+                # Compute dask arrays to numpy since label editing
+                # requires nd fancy indexing which dask doesn't support
+                if isinstance(data, da.Array):
+                    data = data.compute()
                 if "colormap" in meta:
                     del meta["colormap"]
-            if name not in self.viewer.layers:
-                add_method = getattr(self.viewer, f"add_{layer_type.lower()}")
-                add_method(data, **meta)
-            else:
-                self.viewer.layers[name].data = data
+            if name in self.viewer.layers:
+                existing = self.viewer.layers[name]
+                if existing._type_string != layer_type:
+                    self.viewer.layers.remove(existing)
+                else:
+                    existing.data = data
+                    continue
+            add_method = getattr(self.viewer, f"add_{layer_type.lower()}")
+            add_method(data, **meta)
 
 
 class AnyDirectoryDialog(QFileDialog):
