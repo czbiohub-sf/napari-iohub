@@ -201,8 +201,75 @@ Omit `--tracks` (or leave the Tracks field blank) to enter centroid-only mode:
 
 Exactly one state column is non-null per row (the one for the layer the point
 came from). To assign track IDs against a `tracking.zarr`, use the
-`napari-iohub-map-centroids` CLI *(in development)* which samples a kernel
-around each centroid and takes the mode of the non-zero label values.
+`napari-iohub-map-centroids` CLI described below.
+
+## Mapping centroids onto a tracking.zarr
+
+`napari-iohub-map-centroids` takes a CSV (centroid-only OR a previously
+track-mapped CSV) and a `tracking.zarr`, and emits an ultrack-compatible
+track-mapped CSV.
+
+```bash
+napari-iohub-map-centroids \
+  -c /path/to/centroid_or_old.csv \
+  -t /path/to/tracking.zarr \
+  -f A/1/000000 \
+  -o /path/to/mapped.csv \
+  [--kernel 2]
+```
+
+### Flags
+
+| Flag | Meaning |
+|------|---------|
+| `-c`, `--csv PATH` | Input CSV (centroid-only or previously track-mapped). |
+| `-t`, `--tracks PATH` | `tracking.zarr` (HCS plate with segmentation labels). |
+| `-f`, `--fov ROW/WELL/FOV` | FOV to map (required; only this FOV's rows are processed). |
+| `-o`, `--output PATH` | Output CSV path. |
+| `--kernel N` | Half-size of the lookup window. Default `2` → 5×5 px. |
+| `-v`, `--verbose` | Debug logging. |
+
+### How mapping works
+
+For each clicked centroid (auto-detected as: every annotated row for
+per-frame columns `cell_division_state` / `organelle_state`; first
+occurrence per old `track_id` for the sticky-forward columns
+`infection_state` / `cell_death_state`; or every row when the input CSV
+has no `track_id`):
+
+1. Open the labels at `tracking.zarr[fov]["0"][t, 0, 0, y-k:y+k+1, x-k:x+k+1]`.
+2. Take the **mode of the non-zero label values** in that window.
+3. That value becomes the row's `track_id` in the output.
+
+After all clicks are assigned, the events are expanded across the full
+lineage in the FOV's `tracks_<fov>.csv` so the output schema matches
+exactly what the annotator's track-mapped save produces.
+
+### Background hits
+
+If a kernel is entirely zero-labeled (the click landed on background),
+the row is **dropped from the main output** and written to a sibling
+file `<output_stem>_unmapped.csv` with the offending `(t, y, x)` and the
+kernel size used. A summary line at the end of the CLI run prints how
+many were mapped vs unmapped.
+
+### Re-mapping after re-tracking
+
+To carry annotations forward to a new tracking run:
+
+```bash
+napari-iohub-map-centroids \
+  -c old_combined_annotations.csv \
+  -t new_tracking.zarr \
+  -f C/2/000000 \
+  -o new_combined_annotations_C_2_000000.csv
+```
+
+The CLI ignores any `track_id` / `id` / `parent_track_id` columns in the
+input and re-derives them from the new tracking by kernel lookup. Expect
+a few percent drift in per-row state when re-tracking changes which
+label sits under each click — small mis-assignments of sticky-forward
+states (infection, death) get amplified by their propagation.
 
 ## Track-mapped CSV schema (default)
 

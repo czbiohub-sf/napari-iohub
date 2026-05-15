@@ -46,6 +46,7 @@ dev = [
 
 [project.scripts]
 napari-iohub-annotate = "napari_iohub._cli:annotator_main"
+napari-iohub-map-centroids = "napari_iohub._cli:map_centroids_main"
 
 [tool.uv]
 # Pin PyQt6 below 6.10 so wheels for older Linux glibc (manylinux_2_28,
