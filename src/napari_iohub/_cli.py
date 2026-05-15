@@ -15,7 +15,10 @@ def _make_annotator_parser() -> argparse.ArgumentParser:
         description=(
             "Launch napari with the cell-state annotator widget. "
             "Provide --images, --tracks, and --fov to auto-load a dataset, "
-            "and --resume-csv to resume from a previous annotation file."
+            "and --resume-csv to resume from a previous annotation file. "
+            "Omitting --tracks enables centroid-only mode: no labels layer, "
+            "no track_id on save (use napari-iohub-map-centroids to assign "
+            "track IDs against a tracking.zarr later)."
         ),
     )
     parser.add_argument(
@@ -91,8 +94,10 @@ def annotator_main(argv: list[str] | None = None) -> int:
         format="%(asctime)s %(levelname)s %(name)s: %(message)s",
     )
 
-    if args.fov and not args.tracks:
-        parser.error("--fov requires --tracks to be provided")
+    # --fov no longer requires --tracks: omitting tracks runs the annotator
+    # in centroid-only mode (no labels, no track_id on save).
+    if args.fov and not args.images:
+        parser.error("--fov requires --images to be provided")
 
     import napari
 
@@ -102,9 +107,7 @@ def annotator_main(argv: list[str] | None = None) -> int:
     widget = CellStateAnnotatorWidget(viewer)
     viewer.window.add_dock_widget(widget, name="Cell state annotation")
 
-    should_load = bool(
-        args.images and args.tracks and args.fov and not args.no_load
-    )
+    should_load = bool(args.images and args.fov and not args.no_load)
     widget.prefill(
         images=args.images,
         tracks=args.tracks,

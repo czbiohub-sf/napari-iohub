@@ -82,8 +82,11 @@ class CellStateAnnotatorWidget(QWidget):
     def __init__(self, napari_viewer: napari.Viewer) -> None:
         super().__init__()
         self.viewer = napari_viewer
+        self._images_dataset = None
+        self._tracks_dataset = None
         self._tracks_fov = None
         self._tracks_csv_path: Path | None = None
+        self._nav_dataset = None  # iohub Plate that drives the navigation combos
         self._resume_csv_path: Path | None = (
             None  # Optional CSV for resuming annotations
         )
@@ -269,45 +272,73 @@ class CellStateAnnotatorWidget(QWidget):
         self._resume_csv_path = path_obj
         self._status_label.setText(f"Resume CSV: {path_obj.name}")
 
+    def _populate_navigation(self, dataset, source: str) -> None:
+        """Fill row/well/FOV comboboxes from the given iohub Plate dataset.
+
+        Parameters
+        ----------
+        dataset
+            iohub ``Plate`` instance whose metadata drives the comboboxes.
+        source
+            Short label used in the status text (e.g. ``"images"`` or ``"tracks"``).
+        """
+        self._nav_dataset = dataset
+        self._row_cb.clear()
+        self._well_cb.clear()
+        self._fov_cb.clear()
+        self._row_names = [row.name for row in dataset.metadata.rows]
+        self._col_names = [col.name for col in dataset.metadata.columns]
+        self._plate_wells = dataset.metadata.wells
+        self._row_cb.addItems(self._row_names)
+        self._status_label.setText(f"Navigation populated from {source}")
+
     def _on_images_path_changed(self) -> None:
-        """Handle path entry for images dataset."""
+        """Handle path entry for images dataset.
+
+        Populates the FOV navigation comboboxes from the images dataset if
+        no tracks dataset is configured. When tracks are later provided,
+        their navigation takes precedence (called from
+        :meth:`_on_tracks_path_changed`).
+        """
         path = self._images_path_le.text()
         if not path:
             return
         try:
             self._images_dataset = open_ome_zarr(path)
             self._status_label.setText(f"Images: {Path(path).name}")
+            # Populate nav from images only if tracks haven't already done so.
+            if not getattr(self, "_tracks_dataset", None):
+                self._populate_navigation(self._images_dataset, source="images")
         except Exception as e:
             self._status_label.setText(f"Error opening images: {e}")
 
     def _on_tracks_path_changed(self) -> None:
-        """Handle path entry for tracks OME-Zarr directory."""
+        """Handle path entry for tracks OME-Zarr directory.
+
+        If the tracks field is cleared, drops the tracks dataset and rebuilds
+        navigation from the images dataset (centroid-only mode).
+        """
         path = self._tracks_path_le.text()
         if not path:
+            self._tracks_dataset = None
+            self._tracks_csv_path = None
+            if getattr(self, "_images_dataset", None):
+                self._populate_navigation(self._images_dataset, source="images")
             return
 
         try:
             self._tracks_dataset = open_ome_zarr(path)
             self._tracks_csv_path = None
-            # Populate row combobox
-            self._row_cb.clear()
-            self._well_cb.clear()
-            self._fov_cb.clear()
-            self._row_names = [row.name for row in self._tracks_dataset.metadata.rows]
-            self._col_names = [
-                col.name for col in self._tracks_dataset.metadata.columns
-            ]
-            self._plate_wells = self._tracks_dataset.metadata.wells
-            self._row_cb.addItems(self._row_names)
+            self._populate_navigation(self._tracks_dataset, source="tracks")
             self._status_label.setText(f"Tracks: {Path(path).name}")
         except Exception as e:
             self._status_label.setText(f"Error opening tracks: {e}")
 
     def _load_row(self, row_name: str) -> None:
         """Load wells for selected row."""
-        if not row_name or not hasattr(self, "_tracks_dataset"):
+        if not row_name or not getattr(self, "_nav_dataset", None):
             return
-        self._row = self._tracks_dataset[row_name]
+        self._row = self._nav_dataset[row_name]
         self._well_cb.clear()
         self._fov_cb.clear()
         self._well_names = []
@@ -477,24 +508,28 @@ class CellStateAnnotatorWidget(QWidget):
         return channel_data[:, lo:hi].max(axis=1)
 
     def _load_data(self) -> None:
-        """Load images, tracks, and set up annotation layers."""
-        if not hasattr(self, "_images_dataset"):
+        """Load images (and optionally tracks) and set up annotation layers.
+
+        If a tracks OME-Zarr is configured, the original behavior is preserved:
+        load images + segmentation labels + tracks-lineage overlay, then map
+        clicked centroids to track IDs on save. If no tracks path is set,
+        the annotator runs in centroid-only mode: only images and the four
+        annotation point layers are loaded, and ``_save_annotations`` writes
+        a centroid-only CSV (no track_id; one row per clicked point).
+        """
+        if not getattr(self, "_images_dataset", None):
             self._status_label.setText("Error: Select images dataset first")
             return
 
-        has_tracks_dataset = (
-            hasattr(self, "_tracks_dataset") and self._tracks_dataset is not None
-        )
-
-        if not has_tracks_dataset:
-            self._status_label.setText("Error: Select tracks OME-Zarr directory")
-            return
+        has_tracks_dataset = self._tracks_dataset is not None
+        self._centroid_only = not has_tracks_dataset
 
         if not self._fov_name:
             self._status_label.setText("Error: Select a FOV first")
             return
 
-        self._status_label.setText(f"Loading {self._fov_name}...")
+        mode_msg = " (centroid-only mode)" if self._centroid_only else ""
+        self._status_label.setText(f"Loading {self._fov_name}{mode_msg}...")
 
         try:
             # Load image layers (list of (data, kwargs, "image") tuples, one per channel)
@@ -531,50 +566,59 @@ class CellStateAnnotatorWidget(QWidget):
                     projected_layers.append((new_data, kwargs, ltype))
                 image_layers = projected_layers
 
-            # Load tracking labels from OME-Zarr
-            _logger.info(f"Loading tracking labels for {self._fov_name}")
-            self._tracks_fov = self._tracks_dataset[self._fov_name]
-            labels_layer = fov_to_layers(self._tracks_fov, layer_type="labels")[0]
-            # Fix dtype for napari issue #7327
-            labels_layer[0][0] = labels_layer[0][0].astype("uint32")
+            # Load tracking labels and lineage overlay only when tracks are provided
+            if not self._centroid_only:
+                _logger.info(f"Loading tracking labels for {self._fov_name}")
+                self._tracks_fov = self._tracks_dataset[self._fov_name]
+                labels_layer = fov_to_layers(self._tracks_fov, layer_type="labels")[0]
+                # Fix dtype for napari issue #7327
+                labels_layer[0][0] = labels_layer[0][0].astype("uint32")
 
-            # Shape parity check: image YX vs labels YX must match for the
-            # segmentation lookup at save time to work correctly.
-            image_yx = image_fov["0"].shape[-2:]
-            labels_yx = self._tracks_fov["0"].shape[-2:]
-            if image_yx != labels_yx:
-                _logger.warning(
-                    "Image (Y,X)=%s does not match labels (Y,X)=%s; "
-                    "segmentation lookup may be incorrect.",
-                    image_yx,
-                    labels_yx,
-                )
+                # Shape parity check: image YX vs labels YX must match for the
+                # segmentation lookup at save time to work correctly.
+                image_yx = image_fov["0"].shape[-2:]
+                labels_yx = self._tracks_fov["0"].shape[-2:]
+                if image_yx != labels_yx:
+                    _logger.warning(
+                        "Image (Y,X)=%s does not match labels (Y,X)=%s; "
+                        "segmentation lookup may be incorrect.",
+                        image_yx,
+                        labels_yx,
+                    )
 
-            # Labels Z handling. In 2D mode we drop the Z axis entirely so
-            # labels stay 1-plane and the annotation layers can use ndim=3.
-            # In 4D mode, expand the single-Z labels along Z only if the
-            # user asked for it (mirrors the single-cell-features plugin).
-            expand_labels = self._expand_labels_cb.isChecked()
-            if project_2d:
-                labels_layer[0][0] = labels_layer[0][0][:, 0]  # (T,Z=1,Y,X) -> (T,Y,X)
-                tracks_z_index = 0
-            elif expand_labels:
-                _logger.info(f"Expanding tracks to Z={image_z}")
-                labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
-                tracks_z_index = image_z // 2
+                # Labels Z handling. In 2D mode we drop the Z axis entirely so
+                # labels stay 1-plane and the annotation layers can use ndim=3.
+                # In 4D mode, expand the single-Z labels along Z only if the
+                # user asked for it (mirrors the single-cell-features plugin).
+                expand_labels = self._expand_labels_cb.isChecked()
+                if project_2d:
+                    labels_layer[0][0] = labels_layer[0][0][:, 0]  # (T,Z=1,Y,X) -> (T,Y,X)
+                    tracks_z_index = 0
+                elif expand_labels:
+                    _logger.info(f"Expanding tracks to Z={image_z}")
+                    labels_layer[0][0] = labels_layer[0][0].repeat(image_z, axis=1)
+                    tracks_z_index = image_z // 2
+                else:
+                    tracks_z_index = 0  # single-plane labels, place tracks at z=0
+
+                image_layers.append(labels_layer)
+
+                # Load tracks CSV from OME-Zarr directory
+                tracks_dir = Path(self._tracks_path_le.text()) / self._fov_name.strip("/")
+                self._tracks_csv_path = next(tracks_dir.glob("*.csv"))
+                _logger.info(f"Loading tracks from {self._tracks_csv_path}")
+                tracks_layer = _ultrack_read_csv(self._tracks_csv_path)
+                if not project_2d:
+                    tracks_layer[0].insert(loc=2, column="z", value=tracks_z_index)
+                image_layers.append(tracks_layer)
             else:
-                tracks_z_index = 0  # single-plane labels, place tracks at z=0
-
-            image_layers.append(labels_layer)
-
-            # Load tracks CSV from OME-Zarr directory
-            tracks_dir = Path(self._tracks_path_le.text()) / self._fov_name.strip("/")
-            self._tracks_csv_path = next(tracks_dir.glob("*.csv"))
-            _logger.info(f"Loading tracks from {self._tracks_csv_path}")
-            tracks_layer = _ultrack_read_csv(self._tracks_csv_path)
-            if not project_2d:
-                tracks_layer[0].insert(loc=2, column="z", value=tracks_z_index)
-            image_layers.append(tracks_layer)
+                # Centroid-only mode: no labels or lineage overlay.
+                self._tracks_fov = None
+                self._tracks_csv_path = None
+                tracks_z_index = 0 if project_2d else image_z // 2
+                _logger.info(
+                    "Centroid-only mode: skipping labels and tracks-lineage overlay."
+                )
 
             # Clear existing layers and add new ones
             self.viewer.layers.clear()
@@ -588,15 +632,17 @@ class CellStateAnnotatorWidget(QWidget):
             self._focus_z_used = focus_z if project_2d else None
             self._setup_annotation_layers()
 
-            # Load existing annotations from resume CSV if provided, otherwise from tracks CSV
+            # Load existing annotations from resume CSV if provided. With tracks,
+            # we fall back to the tracks CSV to pick up any in-zarr annotations.
             if self._resume_csv_path is not None:
                 _logger.info(
                     f"Loading annotations from resume CSV: {self._resume_csv_path}"
                 )
                 annotation_df = pd.read_csv(self._resume_csv_path)
-            else:
+                self._load_annotations_from_csv(annotation_df, tracks_z_index)
+            elif not self._centroid_only:
                 annotation_df = pd.read_csv(self._tracks_csv_path)
-            self._load_annotations_from_csv(annotation_df, tracks_z_index)
+                self._load_annotations_from_csv(annotation_df, tracks_z_index)
 
             # Bind keybindings (only once)
             if not self._keybindings_bound:
@@ -677,8 +723,12 @@ class CellStateAnnotatorWidget(QWidget):
 
             if col_name in duration_cols:
                 points_df = annotated
-            else:
+            elif "track_id" in annotated.columns:
+                # Track-mapped CSV: collapse to first occurrence per track.
                 points_df = annotated.loc[annotated.groupby("track_id")["t"].idxmin()]
+            else:
+                # Centroid-only CSV: each row is already a single clicked point.
+                points_df = annotated
 
             points = []
             ndim = getattr(self, "_annotation_ndim", 4)
@@ -818,7 +868,24 @@ class CellStateAnnotatorWidget(QWidget):
             _logger.info(f"Removed old backup: {old_backup}")
 
     def _save_annotations(self) -> None:
-        """Save annotations to ultrack-compatible CSV."""
+        """Save annotations to CSV.
+
+        When tracks are loaded, writes an ultrack-compatible CSV that maps
+        each clicked centroid to a track ID via segmentation lookup (the
+        original behavior). When in centroid-only mode (no tracks dataset),
+        writes a minimal CSV with one row per clicked point and no
+        ``track_id`` — the mapping CLI can resolve these against any
+        tracking.zarr later.
+        """
+        if not getattr(self, "_images_dataset", None):
+            self._status_label.setText("Error: Load data first")
+            return
+
+        # Branch: centroid-only mode bypasses the tracks-CSV merge entirely.
+        if getattr(self, "_centroid_only", False):
+            self._save_centroid_only()
+            return
+
         if self._tracks_csv_path is None or self._tracks_fov is None:
             self._status_label.setText("Error: Load data first")
             return
@@ -1034,3 +1101,94 @@ class CellStateAnnotatorWidget(QWidget):
         except Exception as e:
             self._status_label.setText(f"Save error: {e}")
             _logger.exception(f"Failed to save annotations: {e}")
+
+    def _save_centroid_only(self) -> None:
+        """Save annotations as a centroid-only CSV (no track_id, no merging).
+
+        Schema: ``fov_name, t, z, y, x, cell_division_state, infection_state,
+        organelle_state, cell_death_state, annotator, annotation_date,
+        annotation_version``. One row per clicked point. The state column for
+        each row is the state implied by the layer that the point lives in:
+        ``mitosis`` / ``infected`` / ``remodel`` / ``dead`` respectively, with
+        the other three state columns left blank.
+
+        Downstream, ``napari-iohub-map-centroids`` (planned) takes this CSV
+        plus a tracking.zarr and assigns track IDs via segmentation lookup.
+        """
+        try:
+            try:
+                annotator = os.getlogin()
+            except OSError:
+                annotator = getpass.getuser()
+            annotation_date = datetime.now().isoformat()
+
+            # Version bump on resume
+            if self._resume_csv_path is not None:
+                resume_df = pd.read_csv(self._resume_csv_path)
+                if "annotation_version" in resume_df.columns:
+                    old_version = resume_df["annotation_version"].iloc[0]
+                    try:
+                        major, _minor = str(old_version).split(".")
+                        annotation_version = f"{int(major) + 1}.0"
+                    except (ValueError, AttributeError):
+                        annotation_version = "2.0"
+                else:
+                    annotation_version = "2.0"
+            else:
+                annotation_version = "1.0"
+
+            rows: list[dict] = []
+            for layer_name, _color, state_col, state_value in ANNOTATION_LAYERS:
+                if layer_name not in self.viewer.layers:
+                    continue
+                layer = self.viewer.layers[layer_name]
+                for point in layer.data:
+                    coords = [int(c) for c in point]
+                    if len(coords) == 4:
+                        t, z, y, x = coords
+                    else:
+                        t, y, x = coords
+                        z = self._focus_z_used if self._focus_z_used is not None else 0
+                    row = {
+                        "fov_name": self._fov_name,
+                        "t": t,
+                        "z": z,
+                        "y": y,
+                        "x": x,
+                        "cell_division_state": None,
+                        "infection_state": None,
+                        "organelle_state": None,
+                        "cell_death_state": None,
+                        "annotator": annotator,
+                        "annotation_date": annotation_date,
+                        "annotation_version": annotation_version,
+                    }
+                    row[state_col] = state_value
+                    rows.append(row)
+
+            if not rows:
+                self._status_label.setText("No annotations to save")
+                return
+
+            df = pd.DataFrame(rows)
+            df = df.sort_values(["t", "y", "x"]).reset_index(drop=True)
+
+            # Output path
+            if self._resume_csv_path is not None:
+                output_csv = self._resume_csv_path
+            else:
+                images_stem = Path(self._images_path_le.text()).stem
+                row_name, well_name, fov_name = self._fov_name.split("/")
+                base_name = f"{images_stem}_{row_name}_{well_name}_{fov_name}_centroids"
+                output_csv = self._output_path / f"{base_name}.csv"
+
+            self._backup_csv(output_csv)
+            df.to_csv(output_csv, index=False)
+
+            self._status_label.setText(
+                f"Saved {len(df)} centroids to {output_csv.name} (v{annotation_version})"
+            )
+            _logger.info(f"Saved {len(df)} centroids to {output_csv}")
+        except Exception as e:
+            self._status_label.setText(f"Save error: {e}")
+            _logger.exception(f"Failed to save centroid-only annotations: {e}")
