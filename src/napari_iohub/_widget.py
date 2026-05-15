@@ -33,11 +33,32 @@ def _add_nav_combobox(
     return cb
 
 
-def _choose_dir(parent: QWidget, caption="Open a directory"):
+def _choose_dir(parent: QWidget, caption="Open a directory", directory: str | None = None):
+    """Open a directory chooser.
+
+    Parameters
+    ----------
+    parent : QWidget
+        Parent widget for the dialog.
+    caption : str
+        Dialog title.
+    directory : str, optional
+        Starting directory. If provided and exists, the dialog opens there;
+        if it is a file path, opens its parent directory. Falls back to ``os.getcwd()``.
+    """
+    start = os.getcwd()
+    if directory:
+        candidate = os.path.expanduser(directory)
+        if os.path.isdir(candidate):
+            start = candidate
+        elif os.path.isfile(candidate):
+            start = os.path.dirname(candidate) or start
+        elif os.path.isdir(os.path.dirname(candidate)):
+            start = os.path.dirname(candidate)
     path = QFileDialog.getExistingDirectory(
         parent=parent,
         caption=caption,
-        directory=os.getcwd(),
+        directory=start,
     )
     return path
 
