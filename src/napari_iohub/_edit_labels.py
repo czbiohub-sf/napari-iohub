@@ -111,8 +111,9 @@ class _LoadFOV(QWidget):
             return
         _logger.debug(f"Got well name '{well_name}'")
         self.well: Well = self.row[well_name]
-        for img_meta in self.well.zattrs["well"]["images"]:
-            self.fov_names.append(img_meta["path"])
+        # Use Well.metadata.images: works for both NGFF v0.4 (zarr v2) and
+        # v0.5 (zarr v3), unlike raw zattrs which differs by version.
+        self.fov_names = [img.path for img in self.well.metadata.images]
         _logger.debug(f"Found FOVs {self.fov_names} under well {well_name}")
         self.fov_cb.addItems(self.fov_names)
 

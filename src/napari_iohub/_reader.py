@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 from typing import TYPE_CHECKING, Literal
 
@@ -52,6 +53,13 @@ def napari_get_reader(path):
 
 
 def _get_node(path: StrOrBytesPath):
+    """Open an NGFF group via iohub and route by hierarchy level.
+
+    Uses :func:`iohub.ngff.open_ome_zarr` for plates, positions, and tiled
+    positions (works for both NGFF v0.4 / zarr v2 and v0.5 / zarr v3).
+    For *well*-level groups, opens the parent plate and indexes into it
+    so iohub manages the implementation handle uniformly.
+    """
     try:
         zgroup = zarr.open_group(path, mode="r")
     except Exception as e:
@@ -60,14 +68,14 @@ def _get_node(path: StrOrBytesPath):
     if "ome" in attrs:
         attrs = attrs["ome"]
     if "well" in attrs:
-        first_pos_grp = next(zgroup.groups())[1]
-        channel_names = Position(first_pos_grp).channel_names
-        node = Well(
-            group=zgroup,
-            parse_meta=True,
-            channel_names=channel_names,
-            version="0.4",
-        )
+        # Open the parent plate via iohub, then index to this well.
+        zgroup.store.close()
+        well_path = Path(os.fspath(path)).resolve()
+        col_name = well_path.name
+        row_name = well_path.parent.name
+        plate_path = well_path.parent.parent
+        plate = open_ome_zarr(store_path=os.fspath(plate_path), mode="r")
+        node = plate[row_name][col_name]
     elif "plate" in attrs or "multiscales" in attrs:
         zgroup.store.close()
         node = open_ome_zarr(store_path=path, mode="r")
