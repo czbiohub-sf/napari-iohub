@@ -6,6 +6,7 @@ import argparse
 import getpass
 import logging
 import os
+import re
 import sys
 from collections import Counter
 from datetime import datetime
@@ -478,6 +479,227 @@ _ANNOTATION_LAYERS_FOR_CLI = [
     ("_remodel_events", "purple", "organelle_state", "remodel"),
     ("_death_events", "red", "cell_death_state", "dead"),
 ]
+
+
+# Matches the trailing `_<row>_<col>_<fov>` segment of a per-FOV CSV filename,
+# tolerating an optional `_centroids` suffix written by centroid-only saves.
+# Row is one or more alphanumerics (covers `A`, `Control`, etc.), col is
+# digits, fov is digits. Example matches:
+#   2025_07_24_..._A_2_000000.csv          -> ("A", "2", "000000")
+#   plate_C_2_000000_centroids.csv         -> ("C", "2", "000000")
+_FOV_FILENAME_RE = re.compile(r"_([A-Za-z]+)_(\d+)_(\d+)(?:_centroids)?\.csv$")
+
+
+def _parse_fov_from_filename(name: str) -> str | None:
+    """Return ``row/col/fov`` parsed from a per-FOV CSV filename, or ``None``."""
+    m = _FOV_FILENAME_RE.search(name)
+    if not m:
+        return None
+    row, col, fov = m.groups()
+    return f"{row}/{col}/{fov}"
+
+
+def _make_combine_parser() -> argparse.ArgumentParser:
+    """Build the argument parser for the combine-annotations CLI."""
+    parser = argparse.ArgumentParser(
+        prog="napari-iohub-combine-annotations",
+        description=(
+            "Combine per-FOV annotation CSVs in a directory into one dataset-level "
+            "CSV. Auto-detects whether the files are track-mapped (have track_id) "
+            "or centroid-only (no track_id) and refuses to mix them. When --tracks "
+            "is provided alongside track-mapped CSVs, missing lineage columns "
+            "(id, parent_track_id, parent_id) are filled in from the matching "
+            "tracks_<fov>.csv before concatenation. Per-FOV CSVs are never "
+            "modified on disk."
+        ),
+    )
+    parser.add_argument(
+        "-d",
+        "--input-dir",
+        type=Path,
+        required=True,
+        help="Directory containing the per-FOV annotation CSVs.",
+    )
+    parser.add_argument(
+        "-o",
+        "--output",
+        type=Path,
+        required=True,
+        help="Output combined CSV path.",
+    )
+    parser.add_argument(
+        "-t",
+        "--tracks",
+        type=Path,
+        help=(
+            "Optional tracks OME-Zarr. When provided alongside track-mapped "
+            "input CSVs, missing id / parent_track_id / parent_id columns are "
+            "filled in from each FOV's tracks_<fov>.csv."
+        ),
+    )
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        action="store_true",
+        help="Enable debug logging.",
+    )
+    return parser
+
+
+def combine_annotations_main(argv: list[str] | None = None) -> int:
+    """Entry point: combine per-FOV annotation CSVs into a single CSV.
+
+    Workflow:
+      1. Discover per-FOV CSVs in ``--input-dir`` (excluding ``*combined*.csv``
+         and anything under ``backup/``).
+      2. Auto-detect schema by checking whether ``track_id`` is present in
+         every file. Mixed schemas are rejected.
+      3. If ``--tracks`` is provided and the CSVs are track-mapped, fill in
+         missing ``id`` / ``parent_track_id`` / ``parent_id`` columns by
+         merging each per-FOV CSV with its matching ``tracks_<fov>.csv``
+         (keyed on ``track_id, t, y, x``).
+      4. Add a ``fov_name`` column if missing, parsed from the filename.
+      5. Concatenate everything and write to ``--output``.
+    """
+    parser = _make_combine_parser()
+    args = parser.parse_args(argv)
+
+    logging.basicConfig(
+        level=logging.DEBUG if args.verbose else logging.INFO,
+        format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+    )
+    logger = logging.getLogger("napari_iohub.combine_annotations")
+
+    if not args.input_dir.is_dir():
+        parser.error(f"--input-dir is not a directory: {args.input_dir}")
+    if args.tracks is not None and not args.tracks.exists():
+        parser.error(f"--tracks does not exist: {args.tracks}")
+
+    import pandas as pd
+
+    # Discover candidate files
+    candidates = []
+    for path in sorted(args.input_dir.glob("*.csv")):
+        if "combined" in path.name:
+            continue
+        if path.parent.name == "backup":
+            continue
+        candidates.append(path)
+
+    if not candidates:
+        parser.error(
+            f"No per-FOV CSVs found under {args.input_dir} "
+            "(skipped *combined*.csv and backup/)."
+        )
+    logger.info("Found %d candidate per-FOV CSVs", len(candidates))
+
+    # Load and classify each file
+    loaded: list[tuple[Path, str | None, "pd.DataFrame"]] = []
+    skipped: list[tuple[Path, str]] = []
+    for path in candidates:
+        fov_name = _parse_fov_from_filename(path.name)
+        if fov_name is None:
+            skipped.append((path, "unparseable FOV from filename"))
+            continue
+        try:
+            df = pd.read_csv(path)
+        except Exception as e:  # noqa: BLE001 - we want to keep going
+            skipped.append((path, f"read error: {e}"))
+            continue
+        loaded.append((path, fov_name, df))
+
+    if not loaded:
+        parser.error(
+            "No usable per-FOV CSVs after discovery. Skipped:\n  "
+            + "\n  ".join(f"{p.name}: {reason}" for p, reason in skipped)
+        )
+
+    # Auto-detect schema: every file must consistently have track_id or not
+    has_track_id_flags = [
+        "track_id" in df.columns and df["track_id"].notna().any() for _, _, df in loaded
+    ]
+    if all(has_track_id_flags):
+        schema = "track_mapped"
+    elif not any(has_track_id_flags):
+        schema = "centroid_only"
+    else:
+        mixed = [
+            (p.name, "track-mapped" if h else "centroid-only")
+            for (p, _, _), h in zip(loaded, has_track_id_flags)
+        ]
+        parser.error(
+            "Mixed schemas in --input-dir (some files have track_id, others "
+            "don't). Resolve by mapping the centroid-only files with "
+            "napari-iohub-map-centroids first, or move them out of the "
+            "directory. Mixed set:\n  "
+            + "\n  ".join(f"{n}: {kind}" for n, kind in mixed)
+        )
+    logger.info("Schema detected: %s", schema)
+
+    # Optional lineage-column fill-in for track-mapped CSVs
+    if schema == "track_mapped" and args.tracks is not None:
+        lineage_cols = ["id", "parent_track_id", "parent_id"]
+        for i, (path, fov_name, df) in enumerate(loaded):
+            missing = [c for c in lineage_cols if c not in df.columns]
+            if not missing:
+                continue
+            row, col, fov = fov_name.split("/")
+            tracks_csv = args.tracks / row / col / fov / f"tracks_{row}_{col}_{fov}.csv"
+            if not tracks_csv.exists():
+                logger.warning(
+                    "No tracks_<fov>.csv at %s; leaving %d missing lineage "
+                    "columns null for %s",
+                    tracks_csv,
+                    len(missing),
+                    path.name,
+                )
+                continue
+            tracks_df = pd.read_csv(tracks_csv)
+            merge_keys = [k for k in ["track_id", "t", "y", "x"] if k in df.columns and k in tracks_df.columns]
+            keep = merge_keys + [c for c in lineage_cols if c in tracks_df.columns]
+            tracks_subset = tracks_df[keep].drop_duplicates(subset=merge_keys)
+            filled = df.merge(tracks_subset, on=merge_keys, how="left")
+            loaded[i] = (path, fov_name, filled)
+            logger.info(
+                "Filled %s in %s from %s",
+                ",".join(missing),
+                path.name,
+                tracks_csv.name,
+            )
+
+    # Ensure fov_name column is present
+    for i, (path, fov_name, df) in enumerate(loaded):
+        if "fov_name" not in df.columns:
+            df = df.copy()
+            df["fov_name"] = fov_name
+            loaded[i] = (path, fov_name, df)
+
+    combined = pd.concat([df for _, _, df in loaded], ignore_index=True)
+
+    args.output.parent.mkdir(parents=True, exist_ok=True)
+    combined.to_csv(args.output, index=False)
+
+    logger.info(
+        "Wrote %d rows (%d FOVs, schema=%s) to %s",
+        len(combined),
+        len({fov for _, fov, _ in loaded}),
+        schema,
+        args.output,
+    )
+    if skipped:
+        logger.info("Skipped %d files:", len(skipped))
+        for p, reason in skipped:
+            logger.info("  %s: %s", p.name, reason)
+    if schema == "track_mapped":
+        n_missing_id = combined["id"].isna().sum() if "id" in combined.columns else 0
+        if n_missing_id:
+            logger.warning(
+                "%d rows in the combined CSV have a NaN id column (missing "
+                "lineage info). Pass --tracks to fill these from tracks_<fov>.csv.",
+                n_missing_id,
+            )
+
+    return 0
 
 
 if __name__ == "__main__":

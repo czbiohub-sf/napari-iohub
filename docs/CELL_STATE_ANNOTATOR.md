@@ -271,6 +271,50 @@ a few percent drift in per-row state when re-tracking changes which
 label sits under each click — small mis-assignments of sticky-forward
 states (infection, death) get amplified by their propagation.
 
+## Combining per-FOV CSVs into one dataset CSV
+
+After annotating each FOV separately, use
+`napari-iohub-combine-annotations` to merge the per-FOV CSVs in a
+directory into a single dataset-level CSV.
+
+```bash
+napari-iohub-combine-annotations \
+  -d /path/to/annotations_dir \
+  -o /path/to/<dataset>_combined_annotations.csv \
+  [-t /path/to/tracks.zarr]
+```
+
+### Flags
+
+| Flag | Meaning |
+|------|---------|
+| `-d`, `--input-dir PATH` | Directory containing per-FOV annotation CSVs. |
+| `-o`, `--output PATH` | Output combined CSV path. |
+| `-t`, `--tracks PATH` | Optional tracks OME-Zarr. When supplied alongside track-mapped CSVs, missing `id` / `parent_track_id` / `parent_id` columns are filled in from each FOV's `tracks_<fov>.csv`. |
+| `-v`, `--verbose` | Debug logging. |
+
+### Behavior
+
+- **Auto-detects schema**: if every per-FOV CSV has `track_id`, the run
+  is track-mapped; if none do, it's centroid-only; mixed schemas are
+  rejected with a clear error.
+- **Skips** files whose name contains `combined` and anything under a
+  `backup/` subdirectory.
+- **Parses FOV from filename**: matches the trailing `_<row>_<col>_<fov>`
+  segment, tolerating an optional `_centroids` suffix written by
+  centroid-only saves (works for both `<plate>_A_2_000000.csv` and
+  `<plate>_A_2_000000_centroids.csv`). Adds a `fov_name` column if the
+  CSV doesn't already have one.
+- **Lineage fill-in** (track-mapped + `--tracks` only): merges each
+  per-FOV CSV with the corresponding `tracks_<row>_<col>_<fov>.csv`
+  inside the tracks zarr to populate any missing `id`,
+  `parent_track_id`, `parent_id` columns. Per-FOV CSVs are **never
+  modified on disk** — the merge happens in memory and only the
+  combined output is written.
+- **Reports** how many rows, FOVs, and skipped files were processed; if
+  any combined rows have a NaN `id` and tracks weren't supplied, the
+  CLI warns and suggests passing `--tracks`.
+
 ## Track-mapped CSV schema (default)
 
 | Column | Description |
